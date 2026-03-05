@@ -28,7 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadRecommendations();
+    _loadingRec = false;
   }
 
   Future<void> _loadRecommendations() async {
@@ -211,7 +211,24 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (_recommendations.isEmpty) {
-      return const Center(child: Text('추천 종목이 없습니다'));
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.analytics_outlined, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            const Text('종목을 검색하거나', style: TextStyle(fontSize: 15, color: Colors.grey)),
+            const SizedBox(height: 4),
+            const Text('새로고침으로 추천 분석을 시작하세요', style: TextStyle(fontSize: 15, color: Colors.grey)),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh),
+              label: const Text('추천 분석 시작'),
+              onPressed: _loadRecommendations,
+            ),
+          ],
+        ),
+      );
     }
 
     final buyList = _recommendations.where((r) => r.isBuy).toList();
