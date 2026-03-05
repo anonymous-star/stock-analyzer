@@ -1,7 +1,7 @@
 fastapi
 uvicorn[standard]
 yfinance
-google-genai
+groq
 python-dotenv
 httpx
 feedparser

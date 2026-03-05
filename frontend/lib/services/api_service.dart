@@ -7,7 +7,7 @@ import '../models/recommendation.dart';
 
 class ApiService {
   // Change this to your backend IP when running on a physical device
-  static const String baseUrl = 'http://192.168.219.103:8000'; // Windows host WiFi IP
+  static const String baseUrl = 'https://stock-analyzer-uvm7.onrender.com';
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;

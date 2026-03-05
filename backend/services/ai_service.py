@@ -1,7 +1,7 @@
 import os
 import json
 import re
-from google import genai
+from groq import Groq
 
 
 def _build_prompt(ticker: str, technical_data: dict, financial_data: dict, news_headlines: list[str]) -> str:
@@ -109,23 +109,24 @@ async def analyze_stock(
     financial_data: dict,
     news_headlines: list[str],
 ) -> dict:
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         return {
-            "error": "GEMINI_API_KEY not configured",
+            "error": "GROQ_API_KEY not configured",
             "recommendation": "HOLD",
             "confidence": 0,
             "overall_summary": "API 키가 설정되지 않아 분석을 수행할 수 없습니다.",
         }
 
-    client = genai.Client(api_key=api_key)
+    client = Groq(api_key=api_key)
     prompt = _build_prompt(ticker, technical_data, financial_data, news_headlines)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
     )
 
-    analysis = parse_analysis_response(response.text)
+    analysis = parse_analysis_response(response.choices[0].message.content)
     analysis["ticker"] = ticker
     return analysis
