@@ -2,51 +2,132 @@ import yfinance as yf
 from typing import Optional
 from services.kr_stocks import search_kr_stocks
 
+# 미국 주요 종목 매핑 (검색용)
+US_STOCKS = {
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "AMZN": "Amazon",
+    "META": "Meta Platforms", "GOOGL": "Alphabet (Google)", "GOOG": "Alphabet (Google) C",
+    "AVGO": "Broadcom", "TSLA": "Tesla", "COST": "Costco", "NFLX": "Netflix",
+    "AMD": "AMD", "ADBE": "Adobe", "PEP": "PepsiCo", "QCOM": "Qualcomm",
+    "TMUS": "T-Mobile", "CSCO": "Cisco", "INTC": "Intel", "INTU": "Intuit",
+    "CMCSA": "Comcast", "TXN": "Texas Instruments", "AMGN": "Amgen",
+    "HON": "Honeywell", "AMAT": "Applied Materials", "BKNG": "Booking Holdings",
+    "ISRG": "Intuitive Surgical", "LRCX": "Lam Research", "VRTX": "Vertex Pharma",
+    "ADI": "Analog Devices", "REGN": "Regeneron", "KLAC": "KLA Corp",
+    "PANW": "Palo Alto Networks", "ADP": "ADP", "MDLZ": "Mondelez",
+    "SNPS": "Synopsys", "CDNS": "Cadence Design", "GILD": "Gilead Sciences",
+    "MELI": "MercadoLibre", "CRWD": "CrowdStrike", "PYPL": "PayPal",
+    "MAR": "Marriott", "CTAS": "Cintas", "ABNB": "Airbnb",
+    "MRVL": "Marvell Technology", "ORLY": "O'Reilly Auto", "FTNT": "Fortinet",
+    "CEG": "Constellation Energy", "DASH": "DoorDash", "WDAY": "Workday",
+    "CSX": "CSX Corp", "NXPI": "NXP Semiconductors", "ADSK": "Autodesk",
+    "ROP": "Roper Technologies", "FANG": "Diamondback Energy", "MNST": "Monster Beverage",
+    "PCAR": "PACCAR", "ROST": "Ross Stores", "AEP": "American Electric Power",
+    "PAYX": "Paychex", "FAST": "Fastenal", "KDP": "Keurig Dr Pepper",
+    "DDOG": "Datadog", "ODFL": "Old Dominion Freight", "KHC": "Kraft Heinz",
+    "EA": "Electronic Arts", "VRSK": "Verisk Analytics", "CPRT": "Copart",
+    "GEHC": "GE Healthcare", "EXC": "Exelon", "LULU": "Lululemon",
+    "BKR": "Baker Hughes", "XEL": "Xcel Energy", "CTSH": "Cognizant",
+    "IDXX": "IDEXX Labs", "CCEP": "Coca-Cola Europacific", "TTD": "The Trade Desk",
+    "MCHP": "Microchip Technology", "ON": "ON Semiconductor", "CDW": "CDW Corp",
+    "ANSS": "Ansys", "DXCM": "DexCom", "GFS": "GlobalFoundries",
+    "ILMN": "Illumina", "WBD": "Warner Bros Discovery", "ZS": "Zscaler",
+    "MDB": "MongoDB", "TEAM": "Atlassian", "BIIB": "Biogen",
+    "DLTR": "Dollar Tree", "ARM": "Arm Holdings", "SMCI": "Super Micro Computer",
+    "APP": "AppLovin", "PLTR": "Palantir", "COIN": "Coinbase",
+    "MSTR": "MicroStrategy", "CRSP": "CRISPR Therapeutics",
+    "JPM": "JPMorgan Chase", "V": "Visa", "UNH": "UnitedHealth",
+    "XOM": "Exxon Mobil", "LLY": "Eli Lilly", "JNJ": "Johnson & Johnson",
+    "PG": "Procter & Gamble", "CRM": "Salesforce", "ORCL": "Oracle",
+    "DIS": "Walt Disney", "BA": "Boeing", "NKE": "Nike",
+    "SBUX": "Starbucks", "MCD": "McDonald's", "KO": "Coca-Cola",
+    "WMT": "Walmart", "HD": "Home Depot", "CAT": "Caterpillar",
+    "GS": "Goldman Sachs", "MS": "Morgan Stanley", "SQ": "Block (Square)",
+    "SNAP": "Snap Inc", "UBER": "Uber", "LYFT": "Lyft",
+    "ROKU": "Roku", "SHOP": "Shopify", "SQ": "Block",
+    "RBLX": "Roblox", "SOFI": "SoFi Technologies", "RIVN": "Rivian",
+    "LCID": "Lucid Group", "NIO": "NIO", "XPEV": "XPeng",
+    "LI": "Li Auto", "BABA": "Alibaba", "JD": "JD.com",
+    "PDD": "PDD Holdings (Temu)", "BIDU": "Baidu", "BRK-B": "Berkshire Hathaway",
+    "WFC": "Wells Fargo", "C": "Citigroup", "BAC": "Bank of America",
+    "T": "AT&T", "VZ": "Verizon", "ABBV": "AbbVie",
+    "MRK": "Merck", "PFE": "Pfizer", "TMO": "Thermo Fisher",
+    "ABT": "Abbott Labs", "DHR": "Danaher", "BMY": "Bristol-Myers Squibb",
+    "COP": "ConocoPhillips", "CVX": "Chevron", "NEE": "NextEra Energy",
+    "SO": "Southern Company", "DUK": "Duke Energy",
+}
+
 
 def search_stocks(query: str) -> list[dict]:
-    """Search for stocks by name or ticker."""
-    # yfinance doesn't have a direct search API, so we try common patterns
+    """Search for stocks by name or ticker (partial match supported)."""
     results = []
+    query_upper = query.strip().upper()
+    query_lower = query.strip().lower()
 
-    # Try Korean stock name search first
+    # Korean stock name search
     kr_results = search_kr_stocks(query)
-    if kr_results:
-        return kr_results
+    results.extend(kr_results)
 
-    # Try as direct ticker
-    try:
-        ticker = yf.Ticker(query.upper())
-        info = ticker.fast_info
-        history = ticker.history(period="1d")
-        if not history.empty:
+    # US stock search: partial match on ticker and name
+    seen_tickers = {r["ticker"] for r in results}
+    for ticker, name in US_STOCKS.items():
+        if ticker in seen_tickers:
+            continue
+        if (query_upper in ticker or
+            query_lower in name.lower() or
+            query_lower in ticker.lower()):
+            seen_tickers.add(ticker)
             results.append({
-                "ticker": query.upper(),
-                "name": getattr(info, "company_name", query.upper()),
-                "exchange": getattr(info, "exchange", ""),
-                "currency": getattr(info, "currency", "USD"),
+                "ticker": ticker,
+                "name": name,
+                "exchange": "NASDAQ/NYSE",
+                "currency": "USD",
             })
-    except Exception:
-        pass
 
-    # Try Korean stock suffixes
-    if not results and query.isdigit():
+    # If no results, try yfinance as fallback
+    if not results:
+        try:
+            stock = yf.Ticker(query_upper)
+            history = stock.history(period="1d")
+            if not history.empty:
+                name = query_upper
+                try:
+                    full_info = stock.info
+                    name = full_info.get("shortName") or full_info.get("longName") or query_upper
+                except Exception:
+                    pass
+                results.append({
+                    "ticker": query_upper,
+                    "name": name,
+                    "exchange": "",
+                    "currency": getattr(stock.fast_info, "currency", "USD"),
+                })
+        except Exception:
+            pass
+
+    # Try Korean stock code
+    if not results and query.strip().isdigit():
         for suffix in [".KS", ".KQ"]:
             try:
-                t = query + suffix
-                ticker = yf.Ticker(t)
-                history = ticker.history(period="1d")
+                t = query.strip() + suffix
+                stock = yf.Ticker(t)
+                history = stock.history(period="1d")
                 if not history.empty:
-                    info = ticker.fast_info
+                    name = t
+                    try:
+                        full_info = stock.info
+                        name = full_info.get("shortName") or full_info.get("longName") or t
+                    except Exception:
+                        pass
                     results.append({
                         "ticker": t,
-                        "name": getattr(info, "company_name", t),
+                        "name": name,
                         "exchange": "KOSPI" if suffix == ".KS" else "KOSDAQ",
                         "currency": "KRW",
                     })
             except Exception:
                 pass
 
-    return results
+    return results[:20]
 
 
 def get_quote(ticker: str) -> dict:
