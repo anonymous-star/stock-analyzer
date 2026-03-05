@@ -3,12 +3,20 @@ from services.technical_service import get_technical_indicators
 
 # 분석 대상 종목 풀
 DEFAULT_TICKERS = [
-    # 미국
+    # 미국 대형주
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO",
     "JPM", "V", "UNH", "XOM", "LLY", "JNJ", "PG",
-    # 한국
+    # 미국 추가
+    "AMD", "NFLX", "CRM", "ORCL", "COST", "ADBE", "INTC", "QCOM",
+    "DIS", "PYPL", "BA", "NKE", "SBUX", "MCD", "KO", "PEP",
+    "WMT", "HD", "CAT", "GS", "MS", "COIN", "SQ", "PLTR", "SNAP",
+    # 한국 대형주
     "005930.KS", "000660.KS", "035420.KS", "005380.KS", "035720.KQ",
     "068270.KS", "207940.KS", "006400.KS", "051910.KS", "323410.KS",
+    # 한국 추가
+    "000270.KS", "105560.KS", "055550.KS", "034730.KS", "003670.KS",
+    "028260.KS", "012330.KS", "066570.KS", "032830.KS", "003550.KS",
+    "096770.KS", "033780.KS", "011200.KS", "010130.KS", "009150.KS",
 ]
 
 
