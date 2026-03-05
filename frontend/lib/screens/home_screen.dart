@@ -135,15 +135,37 @@ class _HomeScreenState extends State<HomeScreen> {
         final r = _searchResults[i];
         final ticker = r['ticker'] as String? ?? '';
         final name = r['name'] as String? ?? ticker;
+        // 추천 데이터에서 매칭되는 종목 찾기
+        final rec = _recommendations.where((rec) => rec.ticker == ticker).toList();
+        Widget? chip;
+        if (rec.isNotEmpty) {
+          final s = rec.first;
+          Color c;
+          String label;
+          if (s.isBuy) { c = Colors.red; label = '매수'; }
+          else if (s.isSell) { c = Colors.blue; label = '매도'; }
+          else { c = Colors.orange; label = '보유'; }
+          chip = Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(6)),
+            child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+          );
+        }
         return ListTile(
           leading: CircleAvatar(
             backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: Text(ticker.substring(0, 1),
+            child: Text(ticker.substring(0, ticker.length > 0 ? 1 : 0),
                 style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
           ),
           title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: Text(ticker),
-          trailing: Text(r['exchange'] as String? ?? '', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (chip != null) ...[chip, const SizedBox(width: 6)],
+              Text(r['exchange'] as String? ?? '', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+            ],
+          ),
           onTap: () => _goToDetail(ticker, name),
         );
       },
