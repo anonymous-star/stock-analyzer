@@ -3,20 +3,70 @@ from services.technical_service import get_technical_indicators
 
 # 분석 대상 종목 풀
 DEFAULT_TICKERS = [
-    # 미국 대형주
-    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO",
-    "JPM", "V", "UNH", "XOM", "LLY", "JNJ", "PG",
-    # 미국 추가
-    "AMD", "NFLX", "CRM", "ORCL", "COST", "ADBE", "INTC", "QCOM",
-    "DIS", "PYPL", "BA", "NKE", "SBUX", "MCD", "KO", "PEP",
-    "WMT", "HD", "CAT", "GS", "MS", "COIN", "SQ", "PLTR", "SNAP",
-    # 한국 대형주
-    "005930.KS", "000660.KS", "035420.KS", "005380.KS", "035720.KQ",
-    "068270.KS", "207940.KS", "006400.KS", "051910.KS", "323410.KS",
-    # 한국 추가
-    "000270.KS", "105560.KS", "055550.KS", "034730.KS", "003670.KS",
-    "028260.KS", "012330.KS", "066570.KS", "032830.KS", "003550.KS",
-    "096770.KS", "033780.KS", "011200.KS", "010130.KS", "009150.KS",
+    # === 나스닥 100 ===
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "AVGO",
+    "TSLA", "COST", "NFLX", "AMD", "ADBE", "PEP", "QCOM", "TMUS",
+    "CSCO", "INTC", "INTU", "CMCSA", "TXN", "AMGN", "HON", "AMAT",
+    "BKNG", "ISRG", "LRCX", "VRTX", "ADI", "REGN", "KLAC", "PANW",
+    "ADP", "MDLZ", "SNPS", "CDNS", "GILD", "MELI", "CRWD", "PYPL",
+    "MAR", "CTAS", "ABNB", "MRVL", "ORLY", "FTNT", "CEG", "DASH",
+    "WDAY", "CSX", "NXPI", "ADSK", "ROP", "FANG", "MNST", "PCAR",
+    "ROST", "AEP", "PAYX", "FAST", "KDP", "DDOG", "ODFL", "KHC",
+    "EA", "VRSK", "CPRT", "GEHC", "EXC", "LULU", "BKR", "XEL",
+    "CTSH", "IDXX", "CCEP", "TTD", "MCHP", "ON", "CDW", "ANSS",
+    "DXCM", "GFS", "ILMN", "WBD", "ZS", "MDB", "TEAM", "BIIB",
+    "DLTR", "ARM", "SMCI", "APP", "PLTR", "COIN", "MSTR", "CRSP",
+    # === 코스피 시가총액 상위 50 ===
+    "005930.KS",  # 삼성전자
+    "000660.KS",  # SK하이닉스
+    "207940.KS",  # 삼성바이오로직스
+    "373220.KS",  # LG에너지솔루션
+    "005380.KS",  # 현대차
+    "006400.KS",  # 삼성SDI
+    "035420.KS",  # NAVER
+    "000270.KS",  # 기아
+    "068270.KS",  # 셀트리온
+    "051910.KS",  # LG화학
+    "105560.KS",  # KB금융
+    "055550.KS",  # 신한지주
+    "035720.KS",  # 카카오
+    "005490.KS",  # POSCO홀딩스
+    "028260.KS",  # 삼성물산
+    "012330.KS",  # 현대모비스
+    "066570.KS",  # LG전자
+    "003670.KS",  # 포스코퓨처엠
+    "032830.KS",  # 삼성생명
+    "034730.KS",  # SK
+    "017670.KS",  # SK텔레콤
+    "000810.KS",  # 삼성화재
+    "009150.KS",  # 삼성전기
+    "003550.KS",  # LG
+    "096770.KS",  # SK이노베이션
+    "033780.KS",  # KT&G
+    "011200.KS",  # HMM
+    "010130.KS",  # 고려아연
+    "086790.KS",  # 하나금융지주
+    "316140.KS",  # 우리금융지주
+    "010950.KS",  # S-Oil
+    "030200.KS",  # KT
+    "015760.KS",  # 한국전력
+    "011170.KS",  # 롯데케미칼
+    "034020.KS",  # 두산에너빌리티
+    "018260.KS",  # 삼성에스디에스
+    "024110.KS",  # 기업은행
+    "036570.KS",  # 엔씨소프트
+    "259960.KS",  # 크래프톤
+    "352820.KS",  # 하이브
+    "011790.KS",  # SKC
+    "047050.KS",  # 포스코인터내셔널
+    "090430.KS",  # 아모레퍼시픽
+    "006800.KS",  # 미래에셋증권
+    "000720.KS",  # 현대건설
+    "004020.KS",  # 현대제철
+    "010140.KS",  # 삼성중공업
+    "042700.KS",  # 한미약품
+    "326030.KS",  # SK바이오팜
+    "003490.KS",  # 대한항공
 ]
 
 
@@ -126,4 +176,4 @@ def get_recommendations(tickers: list[str] | None = None, limit: int = 10) -> li
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
-    return results[:limit]
+    return results[:limit or 20]
