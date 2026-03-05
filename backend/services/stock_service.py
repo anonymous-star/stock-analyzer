@@ -1,6 +1,9 @@
 import yfinance as yf
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from services.kr_stocks import search_kr_stocks
+
+_search_executor = ThreadPoolExecutor(max_workers=2)
 
 # 미국 주요 종목 매핑 (검색용)
 US_STOCKS = {
@@ -83,49 +86,59 @@ def search_stocks(query: str) -> list[dict]:
                 "currency": "USD",
             })
 
-    # If no results, try yfinance as fallback
+    # If no results, try yfinance as fallback (with 5s timeout)
     if not results:
-        try:
-            stock = yf.Ticker(query_upper)
-            history = stock.history(period="1d")
-            if not history.empty:
-                name = query_upper
-                try:
-                    full_info = stock.info
-                    name = full_info.get("shortName") or full_info.get("longName") or query_upper
-                except Exception:
-                    pass
-                results.append({
-                    "ticker": query_upper,
-                    "name": name,
-                    "exchange": "",
-                    "currency": getattr(stock.fast_info, "currency", "USD"),
-                })
-        except Exception:
-            pass
-
-    # Try Korean stock code
-    if not results and query.strip().isdigit():
-        for suffix in [".KS", ".KQ"]:
+        def _yf_lookup():
             try:
-                t = query.strip() + suffix
-                stock = yf.Ticker(t)
+                stock = yf.Ticker(query_upper)
                 history = stock.history(period="1d")
                 if not history.empty:
-                    name = t
+                    n = query_upper
                     try:
                         full_info = stock.info
-                        name = full_info.get("shortName") or full_info.get("longName") or t
+                        n = full_info.get("shortName") or full_info.get("longName") or query_upper
                     except Exception:
                         pass
-                    results.append({
-                        "ticker": t,
-                        "name": name,
-                        "exchange": "KOSPI" if suffix == ".KS" else "KOSDAQ",
-                        "currency": "KRW",
-                    })
+                    return {"ticker": query_upper, "name": n, "exchange": "", "currency": getattr(stock.fast_info, "currency", "USD")}
             except Exception:
                 pass
+            return None
+
+        try:
+            future = _search_executor.submit(_yf_lookup)
+            result = future.result(timeout=5)
+            if result:
+                results.append(result)
+        except (FuturesTimeoutError, Exception):
+            pass
+
+    # Try Korean stock code (with 5s timeout)
+    if not results and query.strip().isdigit():
+        def _kr_lookup():
+            found = []
+            for suffix in [".KS", ".KQ"]:
+                try:
+                    t = query.strip() + suffix
+                    stock = yf.Ticker(t)
+                    history = stock.history(period="1d")
+                    if not history.empty:
+                        n = t
+                        try:
+                            full_info = stock.info
+                            n = full_info.get("shortName") or full_info.get("longName") or t
+                        except Exception:
+                            pass
+                        found.append({"ticker": t, "name": n, "exchange": "KOSPI" if suffix == ".KS" else "KOSDAQ", "currency": "KRW"})
+                except Exception:
+                    pass
+            return found
+
+        try:
+            future = _search_executor.submit(_kr_lookup)
+            kr_found = future.result(timeout=5)
+            results.extend(kr_found)
+        except (FuturesTimeoutError, Exception):
+            pass
 
     return results[:20]
 
