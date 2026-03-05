@@ -1,3 +1,5 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from services.stock_service import get_quote
 from services.technical_service import get_technical_indicators
 
@@ -68,6 +70,8 @@ DEFAULT_TICKERS = [
     "326030.KS",  # SK바이오팜
     "003490.KS",  # 대한항공
 ]
+
+_executor = ThreadPoolExecutor(max_workers=20)
 
 
 def _score_technical(tech: dict) -> tuple[int, str, list[str]]:
@@ -141,39 +145,46 @@ def _score_technical(tech: dict) -> tuple[int, str, list[str]]:
     return score, rec, reasons[:3]  # 이유는 최대 3개
 
 
-def get_recommendations(tickers: list[str] | None = None, limit: int = 10) -> list[dict]:
+def _analyze_single(ticker: str) -> dict | None:
+    """단일 종목 분석 (스레드에서 실행)."""
+    try:
+        tech = get_technical_indicators(ticker)
+        if "error" in tech:
+            return None
+        quote = get_quote(ticker)
+        if not quote.get("current_price"):
+            return None
+
+        score, rec, reasons = _score_technical(tech)
+
+        return {
+            "ticker": ticker,
+            "name": quote.get("name") or ticker,
+            "current_price": quote.get("current_price"),
+            "change_percent": quote.get("change_percent"),
+            "currency": quote.get("currency"),
+            "recommendation": rec,
+            "score": score,
+            "reasons": reasons,
+            "rsi": tech.get("rsi"),
+            "ma_trend": (tech.get("signals") or {}).get("ma_trend"),
+        }
+    except Exception:
+        return None
+
+
+async def get_recommendations(tickers: list[str] | None = None, limit: int = 20) -> list[dict]:
     """
-    여러 종목을 기술적 지표로 분석해 추천 목록 반환 (점수 내림차순).
+    여러 종목을 병렬로 기술적 지표 분석해 추천 목록 반환 (점수 내림차순).
     """
     pool = tickers if tickers else DEFAULT_TICKERS
-    results = []
+    loop = asyncio.get_event_loop()
 
-    for ticker in pool:
-        try:
-            tech = get_technical_indicators(ticker)
-            if "error" in tech:
-                continue
-            quote = get_quote(ticker)
-            if not quote.get("current_price"):
-                continue
+    futures = [loop.run_in_executor(_executor, _analyze_single, t) for t in pool]
+    raw_results = await asyncio.gather(*futures)
 
-            score, rec, reasons = _score_technical(tech)
-
-            results.append({
-                "ticker": ticker,
-                "name": quote.get("name") or ticker,
-                "current_price": quote.get("current_price"),
-                "change_percent": quote.get("change_percent"),
-                "currency": quote.get("currency"),
-                "recommendation": rec,
-                "score": score,
-                "reasons": reasons,
-                "rsi": tech.get("rsi"),
-                "ma_trend": (tech.get("signals") or {}).get("ma_trend"),
-            })
-        except Exception:
-            continue
+    results = [r for r in raw_results if r is not None]
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
-    return results[:limit or 20]
+    return results[:limit]

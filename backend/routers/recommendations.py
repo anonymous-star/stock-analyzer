@@ -14,7 +14,7 @@ async def recommendations(
     BUY 종목 우선, 점수 높은 순 정렬.
     """
     ticker_list = [t.strip() for t in tickers.split(",")] if tickers else None
-    result = get_recommendations(tickers=ticker_list, limit=limit)
+    result = await get_recommendations(tickers=ticker_list, limit=limit)
     return {
         "count": len(result),
         "recommendations": result,
