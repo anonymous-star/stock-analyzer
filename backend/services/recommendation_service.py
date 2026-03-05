@@ -76,7 +76,7 @@ DEFAULT_TICKERS = [
     "003490.KS",  # 대한항공
 ]
 
-_executor = ThreadPoolExecutor(max_workers=20)
+_executor = ThreadPoolExecutor(max_workers=5)
 
 
 def _score_technical(tech: dict) -> tuple[int, str, list[str]]:
@@ -152,30 +152,39 @@ def _score_technical(tech: dict) -> tuple[int, str, list[str]]:
 
 def _analyze_single(ticker: str) -> dict | None:
     """단일 종목 분석 (스레드에서 실행)."""
-    try:
-        tech = get_technical_indicators(ticker)
-        if "error" in tech:
-            return None
-        quote = get_quote(ticker)
-        if not quote.get("current_price"):
-            return None
+    import time as _time
+    for attempt in range(2):
+        try:
+            tech = get_technical_indicators(ticker)
+            if "error" in tech:
+                return None
+            quote = get_quote(ticker)
+            if not quote.get("current_price"):
+                if attempt == 0:
+                    _time.sleep(1)
+                    continue
+                return None
 
-        score, rec, reasons = _score_technical(tech)
+            score, rec, reasons = _score_technical(tech)
 
-        return {
-            "ticker": ticker,
-            "name": quote.get("name") or ticker,
-            "current_price": quote.get("current_price"),
-            "change_percent": quote.get("change_percent"),
-            "currency": quote.get("currency"),
-            "recommendation": rec,
-            "score": score,
-            "reasons": reasons,
-            "rsi": tech.get("rsi"),
-            "ma_trend": (tech.get("signals") or {}).get("ma_trend"),
-        }
-    except Exception:
-        return None
+            return {
+                "ticker": ticker,
+                "name": quote.get("name") or ticker,
+                "current_price": quote.get("current_price"),
+                "change_percent": quote.get("change_percent"),
+                "currency": quote.get("currency"),
+                "recommendation": rec,
+                "score": score,
+                "reasons": reasons,
+                "rsi": tech.get("rsi"),
+                "ma_trend": (tech.get("signals") or {}).get("ma_trend"),
+            }
+        except Exception:
+            if attempt == 0:
+                _time.sleep(1)
+                continue
+            return None
+    return None
 
 
 async def get_recommendations(tickers: list[str] | None = None, limit: int = 20) -> list[dict]:
@@ -199,7 +208,7 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
 
-    if use_cache:
+    if use_cache and results:
         _cache["data"] = results
         _cache["timestamp"] = time.time()
 
