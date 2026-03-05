@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(pip install:*)",
+      "Bash(uvicorn main:app:*)",
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)",
+      "Bash(pip show:*)",
+      "Bash(python:*)",
+      "Bash(flutter build:*)",
+      "Bash(pkill:*)",
+      "Bash(adb shell:*)",
+      "Bash(adb logcat:*)"
+    ]
+  }
+}

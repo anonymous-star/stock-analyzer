@@ -1,0 +1,128 @@
+# Korean stock name to ticker mapping
+# Format: "한글이름": ("ticker", "exchange")
+
+KR_STOCKS = {
+    # === KOSPI 대형주 ===
+    "삼성전자": ("005930.KS", "KOSPI"),
+    "삼성전자우": ("005935.KS", "KOSPI"),
+    "SK하이닉스": ("000660.KS", "KOSPI"),
+    "LG에너지솔루션": ("373220.KS", "KOSPI"),
+    "삼성바이오로직스": ("207940.KS", "KOSPI"),
+    "현대자동차": ("005380.KS", "KOSPI"),
+    "현대차": ("005380.KS", "KOSPI"),
+    "기아": ("000270.KS", "KOSPI"),
+    "셀트리온": ("068270.KS", "KOSPI"),
+    "KB금융": ("105560.KS", "KOSPI"),
+    "신한지주": ("055550.KS", "KOSPI"),
+    "POSCO홀딩스": ("005490.KS", "KOSPI"),
+    "포스코홀딩스": ("005490.KS", "KOSPI"),
+    "NAVER": ("035420.KS", "KOSPI"),
+    "네이버": ("035420.KS", "KOSPI"),
+    "삼성SDI": ("006400.KS", "KOSPI"),
+    "LG화학": ("051910.KS", "KOSPI"),
+    "삼성물산": ("028260.KS", "KOSPI"),
+    "현대모비스": ("012330.KS", "KOSPI"),
+    "카카오": ("035720.KS", "KOSPI"),
+    "하나금융지주": ("086790.KS", "KOSPI"),
+    "LG전자": ("066570.KS", "KOSPI"),
+    "삼성생명": ("032830.KS", "KOSPI"),
+    "삼성화재": ("000810.KS", "KOSPI"),
+    "한국전력": ("015760.KS", "KOSPI"),
+    "한전": ("015760.KS", "KOSPI"),
+    "SK이노베이션": ("096770.KS", "KOSPI"),
+    "SK텔레콤": ("017670.KS", "KOSPI"),
+    "KT": ("030200.KS", "KOSPI"),
+    "KT&G": ("033780.KS", "KOSPI"),
+    "LG": ("003550.KS", "KOSPI"),
+    "SK": ("034730.KS", "KOSPI"),
+    "두산에너빌리티": ("034020.KS", "KOSPI"),
+    "우리금융지주": ("316140.KS", "KOSPI"),
+    "한화에어로스페이스": ("012450.KS", "KOSPI"),
+    "한화오션": ("042660.KS", "KOSPI"),
+    "HD현대중공업": ("329180.KS", "KOSPI"),
+    "HD한국조선해양": ("009540.KS", "KOSPI"),
+    "삼성중공업": ("010140.KS", "KOSPI"),
+    "대한항공": ("003490.KS", "KOSPI"),
+    "아시아나항공": ("020560.KS", "KOSPI"),
+    "현대건설": ("000720.KS", "KOSPI"),
+    "삼성엔지니어링": ("028050.KS", "KOSPI"),
+    "포스코퓨처엠": ("003670.KS", "KOSPI"),
+    "에코프로비엠": ("247540.KS", "KOSPI"),
+    "SK스퀘어": ("402340.KS", "KOSPI"),
+    "카카오뱅크": ("323410.KS", "KOSPI"),
+    "크래프톤": ("259960.KS", "KOSPI"),
+    "HD현대": ("267250.KS", "KOSPI"),
+    "한화솔루션": ("009830.KS", "KOSPI"),
+    "삼성전기": ("009150.KS", "KOSPI"),
+    "롯데케미칼": ("011170.KS", "KOSPI"),
+    "CJ제일제당": ("097950.KS", "KOSPI"),
+    "아모레퍼시픽": ("090430.KS", "KOSPI"),
+    "LG생활건강": ("051900.KS", "KOSPI"),
+    "삼성카드": ("029780.KS", "KOSPI"),
+    "미래에셋증권": ("006800.KS", "KOSPI"),
+    "한국타이어": ("161390.KS", "KOSPI"),
+    "S-Oil": ("010950.KS", "KOSPI"),
+    "에스오일": ("010950.KS", "KOSPI"),
+    "GS칼텍스": ("078930.KS", "KOSPI"),
+    "고려아연": ("010130.KS", "KOSPI"),
+    "한미사이언스": ("008930.KS", "KOSPI"),
+    "HLB": ("028300.KS", "KOSPI"),
+    "SK바이오팜": ("326030.KS", "KOSPI"),
+    "한온시스템": ("018880.KS", "KOSPI"),
+    "DB손해보험": ("005830.KS", "KOSPI"),
+    "기업은행": ("024110.KS", "KOSPI"),
+    "메리츠금융지주": ("138040.KS", "KOSPI"),
+
+    # === KOSDAQ 주요 종목 ===
+    "에코프로": ("086520.KQ", "KOSDAQ"),
+    "알테오젠": ("196170.KQ", "KOSDAQ"),
+    "엘앤에프": ("066970.KQ", "KOSDAQ"),
+    "HLB생명과학": ("067630.KQ", "KOSDAQ"),
+    "레인보우로보틱스": ("277810.KQ", "KOSDAQ"),
+    "셀트리온제약": ("068760.KQ", "KOSDAQ"),
+    "리노공업": ("058470.KQ", "KOSDAQ"),
+    "펄어비스": ("263750.KQ", "KOSDAQ"),
+    "카카오게임즈": ("293490.KQ", "KOSDAQ"),
+    "JYP엔터테인먼트": ("035900.KQ", "KOSDAQ"),
+    "JYP": ("035900.KQ", "KOSDAQ"),
+    "SM엔터테인먼트": ("041510.KQ", "KOSDAQ"),
+    "SM": ("041510.KQ", "KOSDAQ"),
+    "하이브": ("352820.KQ", "KOSDAQ"),
+    "HYBE": ("352820.KQ", "KOSDAQ"),
+    "CJ ENM": ("035760.KQ", "KOSDAQ"),
+    "위메이드": ("112040.KQ", "KOSDAQ"),
+    "컴투스": ("078340.KQ", "KOSDAQ"),
+    "넷마블": ("251270.KS", "KOSPI"),
+    "엔씨소프트": ("036570.KS", "KOSPI"),
+    "더블유게임즈": ("192080.KQ", "KOSDAQ"),
+    "씨젠": ("096530.KQ", "KOSDAQ"),
+    "메디톡스": ("086900.KQ", "KOSDAQ"),
+    "솔브레인": ("357780.KQ", "KOSDAQ"),
+    "원익IPS": ("240810.KQ", "KOSDAQ"),
+    "티씨케이": ("064760.KQ", "KOSDAQ"),
+    "주성엔지니어링": ("036930.KQ", "KOSDAQ"),
+    "파크시스템스": ("140860.KQ", "KOSDAQ"),
+    "이오테크닉스": ("039030.KQ", "KOSDAQ"),
+    "ISCT": ("095340.KQ", "KOSDAQ"),
+    "한미반도체": ("042700.KQ", "KOSDAQ"),
+}
+
+
+def search_kr_stocks(query: str) -> list[dict]:
+    """Search Korean stocks by name (partial match supported)."""
+    query = query.strip()
+    results = []
+    seen_tickers = set()
+
+    for name, (ticker, exchange) in KR_STOCKS.items():
+        if query in name or name in query:
+            if ticker not in seen_tickers:
+                seen_tickers.add(ticker)
+                results.append({
+                    "ticker": ticker,
+                    "name": name,
+                    "exchange": exchange,
+                    "currency": "KRW",
+                })
+
+    return results

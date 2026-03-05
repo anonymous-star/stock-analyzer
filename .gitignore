@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.vscode/
+.gradle/
+local.properties
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/

@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+yfinance
+pandas-ta
+google-genai
+python-dotenv
+httpx
+feedparser
+pandas
+numpy
+slowapi
