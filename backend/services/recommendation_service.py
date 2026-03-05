@@ -1,7 +1,12 @@
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from services.stock_service import get_quote
 from services.technical_service import get_technical_indicators
+
+# 캐시: {"data": [...], "timestamp": float}
+_cache = {"data": None, "timestamp": 0}
+CACHE_TTL = 3600  # 1시간
 
 # 분석 대상 종목 풀
 DEFAULT_TICKERS = [
@@ -176,7 +181,13 @@ def _analyze_single(ticker: str) -> dict | None:
 async def get_recommendations(tickers: list[str] | None = None, limit: int = 20) -> list[dict]:
     """
     여러 종목을 병렬로 기술적 지표 분석해 추천 목록 반환 (점수 내림차순).
+    결과는 1시간 캐시.
     """
+    # 커스텀 티커가 아니면 캐시 확인
+    use_cache = tickers is None
+    if use_cache and _cache["data"] is not None and (time.time() - _cache["timestamp"]) < CACHE_TTL:
+        return _cache["data"][:limit]
+
     pool = tickers if tickers else DEFAULT_TICKERS
     loop = asyncio.get_event_loop()
 
@@ -187,4 +198,9 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
+
+    if use_cache:
+        _cache["data"] = results
+        _cache["timestamp"] = time.time()
+
     return results[:limit]

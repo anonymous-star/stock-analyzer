@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
@@ -24,11 +25,21 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
   String? _searchError;
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
     _loadingRec = false;
+    // 백그라운드에서 추천 데이터 로드 (chip 표시용, UI 블로킹 없음)
+    _loadRecommendationsSilently();
+  }
+
+  Future<void> _loadRecommendationsSilently() async {
+    try {
+      final data = await _api.getRecommendations(limit: 20);
+      if (mounted) setState(() => _recommendations = data);
+    } catch (_) {}
   }
 
   Future<void> _loadRecommendations() async {
@@ -111,7 +122,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
               onChanged: (v) {
                 setState(() {});
-                if (v.length >= 2) _search(v);
+                _debounce?.cancel();
+                if (v.length >= 2) {
+                  _debounce = Timer(const Duration(milliseconds: 500), () => _search(v));
+                }
               },
               onSubmitted: _search,
             ),
@@ -444,6 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
