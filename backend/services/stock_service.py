@@ -70,9 +70,17 @@ def get_quote(ticker: str) -> dict:
 
     history = stock.history(period="1d", interval="1m")
 
+    # Get company name from full info
+    name = ticker
+    try:
+        full_info = stock.info
+        name = full_info.get("shortName") or full_info.get("longName") or ticker
+    except Exception:
+        pass
+
     return {
         "ticker": ticker,
-        "name": getattr(info, "company_name", ticker),
+        "name": name,
         "current_price": current_price,
         "previous_close": getattr(info, "previous_close", None),
         "change": round(change, 4) if change else 0,
