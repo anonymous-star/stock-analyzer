@@ -2,7 +2,7 @@
 
 const BacktestView = {
   _holdDays: 20,
-  _analysisLoaded: false,
+  _analysisCache: null,
 
   async render(container, holdDays) {
     if (holdDays) this._holdDays = holdDays;
@@ -53,65 +53,74 @@ const BacktestView = {
     this._loadStockResults(resultsDiv, this._holdDays);
   },
 
-  async _loadHoldAnalysis(container) {
-    if (this._analysisLoaded) return;
+  _renderAnalysisFromCache(container, rows) {
+    container.innerHTML = '';
 
-    container.innerHTML = `
-      <div class="section-title">보유 기간별 성과 분석</div>
-      <div class="spinner-container">
-        <div class="spinner"></div>
-        <div class="spinner-text">전 보유 기간 데이터 수집 중... (최초 1회 소요)</div>
-      </div>`;
+    const title = document.createElement('div');
+    title.className = 'section-title';
+    title.textContent = '보유 기간별 성과 분석';
+    container.appendChild(title);
 
-    const periods = [10, 20, 30, 40, 60];
-    try {
-      const allData = await Promise.all(periods.map(d => API.getBacktest(d, 100)));
+    const desc = document.createElement('p');
+    desc.style.cssText = 'color:var(--text-secondary);font-size:.85rem;margin-bottom:1.25rem';
+    desc.textContent = '확신도 티어별 BUY 시그널의 적중률과 평균 수익률을 보유 기간별로 비교합니다.';
+    container.appendChild(desc);
 
-      // Aggregate tiers per hold period
-      const rows = periods.map((days, idx) => {
-        const results = allData[idx].results || [];
-        const tiers = {};
-        const tierNames = ['매우 강력', '강력', '양호', '보통'];
-        tierNames.forEach(t => { tiers[t] = { count: 0, hits: 0, totalRet: 0 }; });
+    const tierNames = ['매우 강력', '강력', '양호', '보통'];
+    const table = document.createElement('div');
+    table.className = 'analysis-table-wrap';
+    table.innerHTML = this._buildAnalysisTable(rows, tierNames);
+    container.appendChild(table);
 
-        results.forEach(r => {
-          Object.entries(r.buy_tiers || {}).forEach(([tier, stats]) => {
-            if (tiers[tier]) {
-              tiers[tier].count += stats.count;
-              tiers[tier].hits += Math.round(stats.hit_rate * stats.count / 100);
-              tiers[tier].totalRet += stats.avg_return * stats.count;
-            }
-          });
+    container.appendChild(this._buildInsightCard(rows, tierNames));
+  },
+
+  _aggregateRows(allData, periods) {
+    return periods.map((days, idx) => {
+      const results = allData[idx].results || [];
+      const tiers = {};
+      const tierNames = ['매우 강력', '강력', '양호', '보통'];
+      tierNames.forEach(t => { tiers[t] = { count: 0, hits: 0, totalRet: 0 }; });
+
+      results.forEach(r => {
+        Object.entries(r.buy_tiers || {}).forEach(([tier, stats]) => {
+          if (tiers[tier]) {
+            tiers[tier].count += stats.count;
+            tiers[tier].hits += Math.round(stats.hit_rate * stats.count / 100);
+            tiers[tier].totalRet += stats.avg_return * stats.count;
+          }
         });
-
-        return { days, tiers, tierNames };
       });
 
-      container.innerHTML = '';
+      return { days, tiers, tierNames };
+    });
+  },
 
-      // Title
-      const title = document.createElement('div');
-      title.className = 'section-title';
-      title.textContent = '보유 기간별 성과 분석';
-      container.appendChild(title);
+  async _loadHoldAnalysis(container) {
+    if (this._analysisCache) {
+      this._renderAnalysisFromCache(container, this._analysisCache);
+      return;
+    }
 
-      // Description
-      const desc = document.createElement('p');
-      desc.style.cssText = 'color:var(--text-secondary);font-size:.85rem;margin-bottom:1.25rem';
-      desc.textContent = '확신도 티어별 BUY 시그널의 적중률과 평균 수익률을 보유 기간별로 비교합니다.';
-      container.appendChild(desc);
+    const periods = [10, 20, 30, 40, 60];
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'spinner-container';
+    container.innerHTML = '<div class="section-title">보유 기간별 성과 분석</div>';
+    container.appendChild(statusDiv);
 
-      // Table
-      const tierNames = ['매우 강력', '강력', '양호', '보통'];
-      const table = document.createElement('div');
-      table.className = 'analysis-table-wrap';
-      table.innerHTML = this._buildAnalysisTable(rows, tierNames);
-      container.appendChild(table);
+    try {
+      // Load sequentially with progress
+      const allData = [];
+      for (let i = 0; i < periods.length; i++) {
+        statusDiv.innerHTML = `
+          <div class="spinner"></div>
+          <div class="spinner-text">10년 백테스트 수집 중... ${periods[i]}일 보유 (${i + 1}/${periods.length})</div>`;
+        allData.push(await API.getBacktest(periods[i], 100));
+      }
 
-      // Insight card
-      container.appendChild(this._buildInsightCard(rows, tierNames));
-
-      this._analysisLoaded = true;
+      const rows = this._aggregateRows(allData, periods);
+      this._analysisCache = rows;
+      this._renderAnalysisFromCache(container, rows);
     } catch (err) {
       container.innerHTML = `<div class="empty-state">보유 기간 분석 실패: ${err.message}</div>`;
     }

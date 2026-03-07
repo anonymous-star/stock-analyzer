@@ -31,48 +31,91 @@ def _safe_float(val) -> float | None:
         return None
 
 
-def _compute_signals_at(close: pd.Series, volume: pd.Series, idx: int) -> dict | None:
-    """주어진 인덱스 시점의 기술적+거래량 신호 계산."""
-    if idx < 200:
+def _precompute_indicators(close: pd.Series, volume: pd.Series) -> dict:
+    """전체 시리즈에 대해 지표를 한 번만 계산."""
+    import numpy as np
+    n = len(close)
+    c = close.values.astype(float)
+    v = volume.values.astype(float)
+
+    ma20 = close.rolling(20).mean().values
+    ma50 = close.rolling(50).mean().values
+    ma200 = close.rolling(200).mean().values
+    bb_std = close.rolling(20).std().values
+
+    # RSI (전체)
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(14).mean().values
+    loss = (-delta.clip(upper=0)).rolling(14).mean().values
+
+    # Volume MA20
+    vol_ma20 = volume.rolling(20).mean().values
+
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd_line = (ema12 - ema26).values
+    signal_line = (ema12 - ema26).ewm(span=9, adjust=False).mean().values
+    macd_hist = macd_line - signal_line
+
+    # 52주 rolling high/low
+    year_high = close.rolling(252, min_periods=200).max().values
+    year_low = close.rolling(252, min_periods=200).min().values
+
+    # Volatility (20일 std / price %)
+    std20 = close.rolling(20).std().values
+
+    return {
+        "c": c, "v": v, "n": n,
+        "ma20": ma20, "ma50": ma50, "ma200": ma200,
+        "bb_std": bb_std,
+        "rsi_gain": gain, "rsi_loss": loss,
+        "vol_ma20": vol_ma20,
+        "macd_line": macd_line, "signal_line": signal_line, "macd_hist": macd_hist,
+        "year_high": year_high, "year_low": year_low,
+        "std20": std20,
+    }
+
+
+def _score_at(ind: dict, i: int) -> dict | None:
+    """사전 계산된 지표에서 i번째 시점의 점수 계산."""
+    if i < 200 or i >= ind["n"]:
         return None
 
-    window = close.iloc[:idx + 1]
-    vol_window = volume.iloc[:idx + 1]
-    price = float(window.iloc[-1])
+    price = ind["c"][i]
+    if price <= 0 or math.isnan(price):
+        return None
 
-    ma20 = float(window.rolling(20).mean().iloc[-1])
-    ma50 = float(window.rolling(50).mean().iloc[-1])
-    ma200 = float(window.rolling(200).mean().iloc[-1])
+    ma20 = ind["ma20"][i]
+    ma50 = ind["ma50"][i]
+    ma200 = ind["ma200"][i]
 
     # RSI
-    delta = window.diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = (-delta.clip(upper=0)).rolling(14).mean()
-    rs = gain.iloc[-1] / loss.iloc[-1] if loss.iloc[-1] != 0 else 100
+    g = ind["rsi_gain"][i]
+    l = ind["rsi_loss"][i]
+    rs = g / l if l != 0 else 100
     rsi = 100 - (100 / (1 + rs))
 
-    # 거래량
-    vol_ma20 = float(vol_window.rolling(20).mean().iloc[-1])
-    current_vol = float(vol_window.iloc[-1])
+    # Volume
+    vol_ma20 = ind["vol_ma20"][i]
+    current_vol = ind["v"][i]
     vol_ratio = current_vol / vol_ma20 if vol_ma20 > 0 else 1.0
 
     # MACD
-    ema12 = float(window.ewm(span=12, adjust=False).mean().iloc[-1])
-    ema26 = float(window.ewm(span=26, adjust=False).mean().iloc[-1])
-    macd_line = ema12 - ema26
-    signal_line = float((window.ewm(span=12, adjust=False).mean() - window.ewm(span=26, adjust=False).mean()).ewm(span=9, adjust=False).mean().iloc[-1])
+    macd_l = ind["macd_line"][i]
+    sig_l = ind["signal_line"][i]
 
-    # 볼린저밴드
-    bb_mid = float(window.rolling(20).mean().iloc[-1])
-    bb_std = float(window.rolling(20).std().iloc[-1])
-    bb_upper = bb_mid + 2 * bb_std
-    bb_lower = bb_mid - 2 * bb_std
+    # BB
+    bb_mid = ma20
+    bb_s = ind["bb_std"][i]
+    bb_upper = bb_mid + 2 * bb_s
+    bb_lower = bb_mid - 2 * bb_s
 
-    # 52주 고저
-    year_high = float(window.max())
-    year_low = float(window.min())
+    # 52주
+    yh = ind["year_high"][i]
+    yl = ind["year_low"][i]
 
-    # 점수 계산 (기술적 + 거래량, 실제 추천과 동일 로직)
+    # === 점수 계산 ===
     score = 0
 
     # MA 추세 (+2/-2)
@@ -94,33 +137,34 @@ def _compute_signals_at(close: pd.Series, volume: pd.Series, idx: int) -> dict |
         score -= 1
 
     # MACD (+1/-1)
-    if macd_line > signal_line:
+    if macd_l > sig_l:
         score += 1
     else:
         score -= 1
 
-    # 볼린저밴드 (+2/-1)
+    # BB (+2/-1)
     if price < bb_lower:
         score += 2
     elif price > bb_upper:
         score -= 1
 
-    # 52주 고저 (강화된 반등 보호)
+    # 52주 고저
     pct_from_low = 999
-    if year_high > 0:
-        pct_from_high = (price - year_high) / year_high
-        pct_from_low = (price - year_low) / year_low if year_low > 0 else 0
+    if yh > 0 and not math.isnan(yh):
+        pct_from_high = (price - yh) / yh
+        pct_from_low = (price - yl) / yl if yl > 0 else 0
         if pct_from_high >= -0.05:
             score -= 1
-        elif pct_from_low <= 0.10:  # 52주 저가 10% 이내
+        elif pct_from_low <= 0.10:
             score += 2
-        elif pct_from_low <= 0.30:  # 52주 저가 30% 이내
+        elif pct_from_low <= 0.30:
             score += 1
 
     near_low = pct_from_low < 0.30
 
     # 거래량 (-3~+4)
-    day_change = (price - float(window.iloc[-2])) / float(window.iloc[-2]) * 100 if len(window) > 1 else 0
+    prev_price = ind["c"][i - 1] if i > 0 else price
+    day_change = (price - prev_price) / prev_price * 100 if prev_price > 0 else 0
     if vol_ratio > 2.0:
         if day_change > 0:
             score += 3
@@ -138,12 +182,13 @@ def _compute_signals_at(close: pd.Series, volume: pd.Series, idx: int) -> dict |
     if day_change > 1 and vol_ratio > 1.3:
         score += 1
 
-    # 모멘텀/반등 보호 (0 ~ +3) — 52주 저가 근처에서만 작동
-    mom5 = (price - float(window.iloc[-6])) / float(window.iloc[-6]) * 100 if len(window) > 5 else 0
-    mom10 = (price - float(window.iloc[-11])) / float(window.iloc[-11]) * 100 if len(window) > 10 else 0
+    # 모멘텀/반등 보호
+    c = ind["c"]
+    mom5 = (price - c[i - 5]) / c[i - 5] * 100 if i >= 5 and c[i - 5] > 0 else 0
+    mom10 = (price - c[i - 10]) / c[i - 10] * 100 if i >= 10 and c[i - 10] > 0 else 0
     down_streak = 0
-    for j in range(len(window) - 1, max(len(window) - 11, 0), -1):
-        if float(window.iloc[j]) < float(window.iloc[j - 1]):
+    for j in range(i, max(i - 10, 0), -1):
+        if c[j] < c[j - 1]:
             down_streak += 1
         else:
             break
@@ -155,55 +200,39 @@ def _compute_signals_at(close: pd.Series, volume: pd.Series, idx: int) -> dict |
     if down_streak >= 3 and near_low:
         score += 1
 
-    # 추가 품질 지표 (10년 교정용)
-    # 변동성 (20일 std / price %)
+    # 품질 지표
     volatility = None
-    if len(window) >= 20:
-        std20 = float(window.tail(20).std())
-        volatility = round(std20 / price * 100, 2) if price > 0 else None
+    s20 = ind["std20"][i]
+    if not math.isnan(s20) and price > 0:
+        volatility = round(s20 / price * 100, 2)
 
-    # BB 폭 (%)
-    bb_width = None
-    if bb_mid > 0:
-        bb_width = round((bb_upper - bb_lower) / bb_mid * 100, 2)
+    bb_width = round((bb_upper - bb_lower) / bb_mid * 100, 2) if bb_mid > 0 else None
 
-    # RSI 변화 (5일)
+    # RSI 변화 (5일 전 RSI)
     rsi_change = None
-    if len(window) > 19:
-        try:
-            prev_w = window.iloc[:-5]
-            d2 = prev_w.diff()
-            g2 = d2.clip(lower=0).rolling(14).mean()
-            l2 = (-d2.clip(upper=0)).rolling(14).mean()
-            rs2 = g2.iloc[-1] / l2.iloc[-1] if l2.iloc[-1] != 0 else 100
-            rsi_prev = 100 - (100 / (1 + rs2))
-            rsi_change = round(rsi - rsi_prev, 1)
-        except Exception:
-            pass
+    if i >= 5:
+        g2 = ind["rsi_gain"][i - 5]
+        l2 = ind["rsi_loss"][i - 5]
+        rs2 = g2 / l2 if l2 != 0 else 100
+        rsi_prev = 100 - (100 / (1 + rs2))
+        rsi_change = round(rsi - rsi_prev, 1)
 
-    # MA20 기울기 (5일 변화 %)
+    # MA20 기울기
     ma20_slope = None
-    if len(window) >= 25:
-        ma20_prev = float(window.iloc[:-5].rolling(20).mean().iloc[-1])
-        if ma20_prev > 0:
+    if i >= 5:
+        ma20_prev = ind["ma20"][i - 5]
+        if ma20_prev > 0 and not math.isnan(ma20_prev):
             ma20_slope = round((ma20 - ma20_prev) / ma20_prev * 100, 3)
 
     # MACD 가속도
     macd_accel = None
-    if len(window) >= 2:
-        try:
-            macd_series = window.ewm(span=12, adjust=False).mean() - window.ewm(span=26, adjust=False).mean()
-            hist_series = macd_series - macd_series.ewm(span=9, adjust=False).mean()
-            macd_accel = round(float(hist_series.iloc[-1]) - float(hist_series.iloc[-2]), 4)
-        except Exception:
-            pass
+    if i >= 1:
+        macd_accel = round(ind["macd_hist"][i] - ind["macd_hist"][i - 1], 4)
 
-    # 20일 추세 (%)
+    # 20일 추세
     trend_20d = None
-    if len(window) >= 21:
-        price_20d_ago = float(window.iloc[-21])
-        if price_20d_ago > 0:
-            trend_20d = round((price - price_20d_ago) / price_20d_ago * 100, 2)
+    if i >= 20 and c[i - 20] > 0:
+        trend_20d = round((price - c[i - 20]) / c[i - 20] * 100, 2)
 
     return {
         "price": price,
@@ -337,25 +366,27 @@ def _confidence_tier(confidence: int) -> str:
         return "보통"
 
 
-def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 3) -> dict | None:
-    """단일 종목 백테스트: 1년 슬라이딩 윈도우."""
+def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7) -> dict | None:
+    """단일 종목 백테스트: 10년 슬라이딩 윈도우 (7일 간격 샘플링)."""
     try:
         stock = yf.Ticker(ticker)
-        df = stock.history(period="2y", interval="1d")
+        df = stock.history(period="10y", interval="1d")
         if df.empty or len(df) < 220:
             return None
 
         close = df["Close"]
         volume = df["Volume"]
 
+        # 전체 지표 한 번만 계산
+        ind = _precompute_indicators(close, volume)
+
         trades = {"BUY": [], "HOLD": [], "SELL": []}
-        # 확신도 티어별 BUY 적중률 추적
         buy_by_tier = {"매우 강력": [], "강력": [], "양호": [], "보통": []}
         total_signals = 0
 
-        # 3일 간격 샘플링
+        # 7일 간격 샘플링 (10년 데이터 최적화)
         for i in range(200, len(df) - hold_days, sample_interval):
-            signals = _compute_signals_at(close, volume, i)
+            signals = _score_at(ind, i)
             if signals is None:
                 continue
 

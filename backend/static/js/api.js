@@ -3,13 +3,19 @@
 const API = {
   BASE: '',
 
-  async _fetch(url) {
-    const res = await fetch(this.BASE + url);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+  async _fetch(url, timeoutMs = 600000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(this.BASE + url, { signal: controller.signal });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return res.json();
+    } finally {
+      clearTimeout(timer);
     }
-    return res.json();
   },
 
   async _post(url) {
