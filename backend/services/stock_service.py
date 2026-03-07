@@ -164,11 +164,33 @@ def get_quote(ticker: str) -> dict:
 
     history = stock.history(period="1d", interval="1m")
 
-    # Get company name from full info
+    # Get company name + financial data from full info (single call)
     name = ticker
+    financials = {}
     try:
         full_info = stock.info
         name = full_info.get("shortName") or full_info.get("longName") or ticker
+        # 재무 데이터 추출 (추가 API 호출 없음)
+        import math
+
+        def _sf(v):
+            try:
+                if v is None: return None
+                f = float(v)
+                return None if math.isnan(f) or math.isinf(f) else round(f, 4)
+            except (TypeError, ValueError):
+                return None
+
+        financials = {
+            "pe_ratio": _sf(full_info.get("trailingPE")),
+            "forward_pe": _sf(full_info.get("forwardPE")),
+            "pb_ratio": _sf(full_info.get("priceToBook")),
+            "roe": _sf(full_info.get("returnOnEquity")),
+            "debt_to_equity": _sf(full_info.get("debtToEquity")),
+            "revenue_growth": _sf(full_info.get("revenueGrowth")),
+            "earnings_growth": _sf(full_info.get("earningsGrowth")),
+            "profit_margin": _sf(full_info.get("profitMargins")),
+        }
     except Exception:
         pass
 
@@ -184,6 +206,7 @@ def get_quote(ticker: str) -> dict:
         "currency": getattr(info, "currency", "USD"),
         "52_week_high": getattr(info, "year_high", None),
         "52_week_low": getattr(info, "year_low", None),
+        "financials": financials,
     }
 
 

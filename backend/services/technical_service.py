@@ -111,6 +111,87 @@ def get_technical_indicators(ticker: str) -> dict:
     result["volume_ma20"] = _safe_float(vol_ma20.iloc[-1])
     result["current_volume"] = int(volume.iloc[-1]) if not pd.isna(volume.iloc[-1]) else None
 
+    # Momentum metrics
+    if len(close) >= 6:
+        mom5 = (float(close.iloc[-1]) - float(close.iloc[-6])) / float(close.iloc[-6]) * 100
+        result["momentum_5d"] = round(mom5, 2)
+    if len(close) >= 11:
+        mom10 = (float(close.iloc[-1]) - float(close.iloc[-11])) / float(close.iloc[-11]) * 100
+        result["momentum_10d"] = round(mom10, 2)
+
+    # Consecutive down days
+    down_streak = 0
+    for j in range(len(close) - 1, max(len(close) - 11, 0), -1):
+        if float(close.iloc[j]) < float(close.iloc[j - 1]):
+            down_streak += 1
+        else:
+            break
+    result["down_streak"] = down_streak
+
+    # Volatility (20-day std / price, %)
+    if len(close) >= 20:
+        vol_20d = float(close.tail(20).std() / close.iloc[-1] * 100)
+        result["volatility"] = round(vol_20d, 2)
+
+    # MACD acceleration (histogram change)
+    macd_data = result.get("macd")
+    if macd_data and macd_data.get("histogram") is not None and len(close) >= 30:
+        try:
+            if HAS_PANDAS_TA:
+                macd_df = ta.macd(close, fast=12, slow=26, signal=9)
+                if macd_df is not None and len(macd_df) >= 2:
+                    hist_now = _safe_float(macd_df.iloc[-1, 1])
+                    hist_prev = _safe_float(macd_df.iloc[-2, 1])
+                    if hist_now is not None and hist_prev is not None:
+                        result["macd_accel"] = round(hist_now - hist_prev, 4)
+            else:
+                ema12 = close.ewm(span=12, adjust=False).mean()
+                ema26 = close.ewm(span=26, adjust=False).mean()
+                macd_line = ema12 - ema26
+                sig = macd_line.ewm(span=9, adjust=False).mean()
+                hist_series = macd_line - sig
+                result["macd_accel"] = round(float(hist_series.iloc[-1]) - float(hist_series.iloc[-2]), 4)
+        except Exception:
+            pass
+
+    # MA20 slope (5-day change %)
+    if len(close) >= 25:
+        ma20_now = result.get("ma20")
+        ma20_prev = _safe_float(close.rolling(20).mean().iloc[-6])
+        if ma20_now and ma20_prev and ma20_prev > 0:
+            result["ma20_slope"] = round((ma20_now - ma20_prev) / ma20_prev * 100, 3)
+
+    # BB width (%)
+    bb = result.get("bollinger_bands")
+    if bb and bb.get("upper") and bb.get("lower") and bb.get("mid") and bb["mid"] > 0:
+        result["bb_width"] = round((bb["upper"] - bb["lower"]) / bb["mid"] * 100, 2)
+
+    # RSI change (5-day)
+    rsi_now = result.get("rsi")
+    if rsi_now is not None and len(close) >= 20:
+        try:
+            prev_close = close.iloc[:-5]
+            if HAS_PANDAS_TA:
+                rsi_prev_s = ta.rsi(prev_close, length=14)
+                rsi_prev = _safe_float(rsi_prev_s.iloc[-1]) if rsi_prev_s is not None and not rsi_prev_s.empty else None
+            else:
+                d = prev_close.diff()
+                g = d.clip(lower=0).rolling(14).mean()
+                l = (-d.clip(upper=0)).rolling(14).mean()
+                rs_p = g / l
+                rsi_p = 100 - (100 / (1 + rs_p))
+                rsi_prev = _safe_float(rsi_p.iloc[-1])
+            if rsi_prev is not None:
+                result["rsi_change_5d"] = round(rsi_now - rsi_prev, 1)
+        except Exception:
+            pass
+
+    # 20-day trend (%)
+    if len(close) >= 21:
+        price_20d_ago = float(close.iloc[-21])
+        if price_20d_ago > 0:
+            result["trend_20d"] = round((float(close.iloc[-1]) - price_20d_ago) / price_20d_ago * 100, 2)
+
     # Signals interpretation
     result["signals"] = _interpret_signals(result)
 

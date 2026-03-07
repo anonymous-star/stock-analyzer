@@ -162,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
           chip = Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(6)),
-            child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+            child: Text('$label ${s.confidence}%', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
           );
         }
         return ListTile(
@@ -269,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Text(
-              '※ 기술적 지표(MA·RSI·MACD·볼린저밴드) 기반 자동 분석\n   투자 판단은 본인 책임입니다.',
+              '※ 기술적·재무·거래량·뉴스 복합 지표 기반 자동 분석\n   투자 판단은 본인 책임입니다.',
               style: TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ),
@@ -348,15 +348,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-                  // 추천 뱃지
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: recColor,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(recLabel,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  // 추천 뱃지 + 확신도
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: recColor,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('$recLabel ${r.confidence}%',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _confidenceLabel(r.confidence),
+                        style: TextStyle(fontSize: 10, color: recColor, fontWeight: FontWeight.w500),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -375,45 +385,76 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(color: priceColor, fontWeight: FontWeight.w600, fontSize: 13),
                   ),
                   const Spacer(),
-                  // 점수
-                  Row(
-                    children: [
-                      const Text('점수 ', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ...List.generate(5, (i) {
-                        final filled = i < r.score.abs().clamp(0, 5);
-                        return Icon(
-                          filled ? Icons.circle : Icons.circle_outlined,
-                          size: 8,
-                          color: filled ? recColor : Colors.grey[300],
-                        );
-                      }),
-                    ],
+                  // 점수 (숫자 표시)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: recColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${r.score > 0 ? "+" : ""}${r.score}/${r.maxScore}',
+                      style: TextStyle(fontSize: 12, color: recColor, fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ],
               ),
-              // RSI
-              if (r.rsi != null) ...[
-                const SizedBox(height: 6),
+              // 점수 breakdown
+              if (r.scoreBreakdown != null) ...[
+                const SizedBox(height: 8),
                 Row(
                   children: [
+                    _breakdownChip('기술', r.scoreBreakdown!.technical, 8),
+                    const SizedBox(width: 4),
+                    _breakdownChip('재무', r.scoreBreakdown!.financial, 6),
+                    const SizedBox(width: 4),
+                    _breakdownChip('거래량', r.scoreBreakdown!.volume, 4),
+                    if (r.scoreBreakdown!.momentum != 0) ...[
+                      const SizedBox(width: 4),
+                      _breakdownChip('반등', r.scoreBreakdown!.momentum, 3),
+                    ],
+                    if (r.scoreBreakdown!.news != 0) ...[
+                      const SizedBox(width: 4),
+                      _breakdownChip('뉴스', r.scoreBreakdown!.news, 3),
+                    ],
+                  ],
+                ),
+              ],
+              // RSI + PER + 거래량
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  if (r.rsi != null)
                     Text('RSI ${r.rsi!.toStringAsFixed(1)}',
                         style: TextStyle(
                           fontSize: 12,
                           color: r.rsi! > 70 ? Colors.red : r.rsi! < 30 ? Colors.blue : Colors.grey[600],
                           fontWeight: FontWeight.w500,
                         )),
+                  if (r.rsi != null && r.maTrend != null) const SizedBox(width: 8),
+                  if (r.maTrend != null)
+                    Text(
+                      _trendLabel(r.maTrend!),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: r.maTrend == 'bullish' ? Colors.red : r.maTrend == 'bearish' ? Colors.blue : Colors.grey,
+                      ),
+                    ),
+                  if (r.peRatio != null) ...[
                     const SizedBox(width: 8),
-                    if (r.maTrend != null)
-                      Text(
-                        _trendLabel(r.maTrend!),
+                    Text('PER ${r.peRatio!.toStringAsFixed(1)}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  ],
+                  if (r.volumeRatio != null) ...[
+                    const SizedBox(width: 8),
+                    Text('Vol ${r.volumeRatio!.toStringAsFixed(1)}x',
                         style: TextStyle(
                           fontSize: 12,
-                          color: r.maTrend == 'bullish' ? Colors.red : r.maTrend == 'bearish' ? Colors.blue : Colors.grey,
-                        ),
-                      ),
+                          color: r.volumeRatio! > 1.5 ? Colors.amber[700] : Colors.grey[600],
+                        )),
                   ],
-                ),
-              ],
+                ],
+              ),
               // 이유
               if (r.reasons.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -436,6 +477,37 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  String _confidenceLabel(int confidence) {
+    if (confidence >= 80) return '매우 강력';
+    if (confidence >= 70) return '강력';
+    if (confidence >= 60) return '양호';
+    if (confidence >= 50) return '보통';
+    return '약함';
+  }
+
+  Widget _breakdownChip(String label, int score, int max) {
+    Color c;
+    if (score > 0) {
+      c = Colors.red;
+    } else if (score < 0) {
+      c = Colors.blue;
+    } else {
+      c = Colors.grey;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: c.withOpacity(0.2)),
+      ),
+      child: Text(
+        '$label ${score > 0 ? "+" : ""}$score',
+        style: TextStyle(fontSize: 10, color: c, fontWeight: FontWeight.w600),
       ),
     );
   }

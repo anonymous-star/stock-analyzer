@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>주식 분석기</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-left">
+      <a href="#/" class="nav-logo">주식 분석기</a>
+      <a href="#/" class="nav-link" data-route="/">대시보드</a>
+      <a href="#/backtest" class="nav-link" data-route="/backtest">백테스트</a>
+    </div>
+    <div class="nav-right">
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="종목명 또는 티커 검색..." autocomplete="off">
+        <div id="search-dropdown" class="search-dropdown hidden"></div>
+      </div>
+    </div>
+  </nav>
+
+  <main id="app"></main>
+
+  <!-- AI Analysis Modal -->
+  <div id="ai-modal" class="modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>AI 종합 분석</h2>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div id="ai-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="/static/js/components/utils.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/components/rec-card.js"></script>
+  <script src="/static/js/components/price-chart.js"></script>
+  <script src="/static/js/components/indicators.js"></script>
+  <script src="/static/js/components/financials.js"></script>
+  <script src="/static/js/components/news-list.js"></script>
+  <script src="/static/js/views/dashboard.js"></script>
+  <script src="/static/js/views/stock-detail.js"></script>
+  <script src="/static/js/views/backtest.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
