@@ -103,6 +103,7 @@ app.add_middleware(
         "https://civilisable-albertha-preeconomical.ngrok-free.dev",
         "http://localhost:8000",
         "http://192.168.219.103:8000",
+        "https://*.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -134,6 +135,12 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
 
 
 @app.api_route("/{path:path}", methods=["GET"], include_in_schema=False)

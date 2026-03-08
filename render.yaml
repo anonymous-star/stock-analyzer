@@ -1,11 +1,19 @@
 services:
   - type: web
-    name: stock-analyzer
+    name: stock-analyzer-api
     runtime: docker
     plan: free
-    dockerfilePath: ./Dockerfile
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: GROQ_API_KEY
+        sync: false
+      - key: KAKAO_JS_KEY
+        sync: false
+      - key: KAKAO_REST_KEY
+        sync: false
+      - key: JWT_SECRET
         sync: false
