@@ -62,7 +62,7 @@ const DashboardView = {
 
   async _addMarketWarning(container) {
     try {
-      const data = await API.getAdvisor();
+      const data = await API.getMarketRegime();
       const regime = data.market_regime;
       if (regime === '하락장' || regime === '약세장') {
         const warn = document.createElement('div');

@@ -42,16 +42,17 @@ function clearApiCache(prefix) {
 // Search:            캐시 안 함
 
 const TTL = {
-  REC:       5 * 60 * 1000,
-  QUOTE:     2 * 60 * 1000,
-  TECH:      3 * 60 * 1000,
-  FIN:      10 * 60 * 1000,
-  NEWS:      5 * 60 * 1000,
-  HISTORY:   5 * 60 * 1000,
-  BACKTEST: 10 * 60 * 1000,
-  PORTFOLIO: 1 * 60 * 1000,
-  ADVISOR:   5 * 60 * 1000,
-  MODEL:    10 * 60 * 1000,
+  REC:       10 * 60 * 1000,  // 10분 (백엔드 1시간 캐시)
+  QUOTE:      3 * 60 * 1000,  // 3분
+  TECH:       5 * 60 * 1000,  // 5분
+  FIN:       15 * 60 * 1000,  // 15분
+  NEWS:      10 * 60 * 1000,  // 10분
+  HISTORY:   10 * 60 * 1000,  // 10분
+  BACKTEST:  15 * 60 * 1000,  // 15분
+  PORTFOLIO:  3 * 60 * 1000,  // 3분 (매수/매도 시 수동 무효화)
+  ADVISOR:   10 * 60 * 1000,  // 10분
+  MODEL:     15 * 60 * 1000,  // 15분
+  REGIME:     5 * 60 * 1000,  // 5분 (시장 레짐)
 };
 
 // === API Client ===
@@ -146,12 +147,17 @@ const API = {
     return _cached(`pf-hist:${limit}`, TTL.PORTFOLIO, () => this._fetch(`/portfolio/history?limit=${limit}`));
   },
 
-  // AI Advisor (5분 캐시)
+  // 시장 레짐 (5분 캐시, 가벼움)
+  getMarketRegime() {
+    return _cached('regime', TTL.REGIME, () => this._fetch('/portfolio/market-regime'));
+  },
+
+  // AI Advisor (10분 캐시)
   getAdvisor() {
     return _cached('advisor', TTL.ADVISOR, () => this._fetch('/portfolio/advisor', 120000));
   },
 
-  // Model Info (10분 캐시)
+  // Model Info (15분 캐시)
   getModelInfo() {
     return _cached('model-info', TTL.MODEL, () => this._fetch('/model/info'));
   },

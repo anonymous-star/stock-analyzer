@@ -73,15 +73,30 @@ const Auth = {
         Kakao.init(this.KAKAO_APP_KEY);
       }
       return window.Kakao && Kakao.isInitialized();
-    } catch {
+    } catch (e) {
+      console.warn('Kakao init error:', e);
       return false;
     }
   },
 
+  // 카카오 SDK 로드 대기 (최대 5초)
+  _waitForKakaoSDK() {
+    return new Promise((resolve) => {
+      if (window.Kakao) return resolve(true);
+      let tries = 0;
+      const check = setInterval(() => {
+        tries++;
+        if (window.Kakao) { clearInterval(check); resolve(true); }
+        else if (tries > 50) { clearInterval(check); resolve(false); }
+      }, 100);
+    });
+  },
+
   // 카카오 로그인
   async kakaoLogin() {
+    await this._waitForKakaoSDK();
     if (!this.initKakao()) {
-      throw new Error('카카오 앱 키가 설정되지 않았습니다. .env에 KAKAO_JS_KEY를 설정하세요.');
+      throw new Error('카카오 SDK 로드에 실패했습니다. 페이지를 새로고침 해주세요.');
     }
 
     return new Promise((resolve, reject) => {

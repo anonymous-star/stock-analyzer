@@ -53,10 +53,15 @@ app.add_middleware(SecurityHeadersMiddleware)
 # TODO: Replace "*" with actual domain(s) once known (e.g. "https://yourdomain.com")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://anonymous-star.github.io",
+        "https://civilisable-albertha-preeconomical.ngrok-free.dev",
+        "http://localhost:8000",
+        "http://192.168.219.103:8000",
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning"],
 )
 
 app.add_middleware(

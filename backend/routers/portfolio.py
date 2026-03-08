@@ -233,6 +233,21 @@ async def api_history(limit: int = Query(default=100, ge=1, le=500), authorizati
     }
 
 
+@router.get("/market-regime")
+async def api_market_regime():
+    """시장 레짐만 빠르게 반환 (Dashboard 경고용)."""
+    from services.ml_service import get_current_market_features
+    mkt_us = get_current_market_features(is_korean=False)
+    breadth = mkt_us.get("market_breadth", 1.5)
+    regime = "하락장" if breadth == 0 else "약세장" if breadth <= 1 else "보통" if breadth <= 2 else "상승장"
+    return {
+        "market_regime": regime,
+        "market_breadth": breadth,
+        "trend_20d": mkt_us.get("market_trend_20d", 0),
+        "volatility": mkt_us.get("market_volatility", 3),
+    }
+
+
 @router.get("/advisor")
 async def api_advisor(authorization: str = Header(default="")):
     """AI 투자 어드바이저 — LLM 기반 맞춤 가이드."""

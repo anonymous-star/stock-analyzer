@@ -10,8 +10,7 @@ const App = {
     this._setupSellModal();
     this._setupUserMenu();
     this._updateAuthUI();
-    this._route();
-    // 카카오 앱 키 로드 (비동기, 실패해도 무관)
+    // 카카오 앱 키 로드 후 라우팅 (로그인 페이지에서 카카오 버튼 표시)
     try {
       const cfg = await fetch('/auth/config').then(r => r.json());
       if (cfg.kakao_js_key) {
@@ -19,6 +18,7 @@ const App = {
         Auth.initKakao();
       }
     } catch {}
+    this._route();
   },
 
   _setupTheme() {
