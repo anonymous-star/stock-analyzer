@@ -103,7 +103,7 @@ app.add_middleware(
         "https://civilisable-albertha-preeconomical.ngrok-free.dev",
         "http://localhost:8000",
         "http://192.168.219.103:8000",
-        "https://*.onrender.com",
+        "https://stock-analyzer-uvm7.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
