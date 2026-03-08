@@ -14,8 +14,11 @@ class AuthRequest(BaseModel):
     display_name: str = ""
 
 
-class KakaoLoginRequest(BaseModel):
-    kakao_id: str
+class KakaoCodeRequest(BaseModel):
+    code: str = ""
+    redirect_uri: str = ""
+    # Legacy fields
+    kakao_id: str = ""
     nickname: str = ""
     profile_image: str = ""
 
@@ -35,10 +38,53 @@ async def api_login(req: AuthRequest):
 
 
 @router.post("/kakao")
-async def api_kakao_login(req: KakaoLoginRequest):
-    """카카오 로그인 — 프론트에서 Kakao JS SDK로 인증 후 유저 정보 전달."""
-    result = kakao_login(req.kakao_id, req.nickname, req.profile_image)
-    return result
+async def api_kakao_login(req: KakaoCodeRequest):
+    """카카오 로그인 — authorization code flow (SDK v2)."""
+    # New: authorization code → token → user info
+    if req.code and req.redirect_uri:
+        import httpx
+        rest_key = os.getenv("KAKAO_REST_KEY", "")
+        if not rest_key:
+            return {"error": "서버에 KAKAO_REST_KEY가 설정되지 않았습니다"}
+
+        async with httpx.AsyncClient() as client:
+            # 1. Exchange code for access token
+            token_res = await client.post(
+                "https://kauth.kakao.com/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": rest_key,
+                    "redirect_uri": req.redirect_uri,
+                    "code": req.code,
+                },
+            )
+            token_data = token_res.json()
+            access_token = token_data.get("access_token")
+            if not access_token:
+                return {"error": f"카카오 토큰 발급 실패: {token_data.get('error_description', 'Unknown')}"}
+
+            # 2. Get user info
+            user_res = await client.get(
+                "https://kapi.kakao.com/v2/user/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            user_data = user_res.json()
+
+        kakao_id = str(user_data.get("id", ""))
+        profile = user_data.get("kakao_account", {}).get("profile", {})
+        nickname = profile.get("nickname", "")
+        profile_image = profile.get("thumbnail_image_url", "")
+
+        if not kakao_id:
+            return {"error": "카카오 유저 정보 조회 실패"}
+
+        return kakao_login(kakao_id, nickname, profile_image)
+
+    # Legacy: direct kakao_id
+    if req.kakao_id:
+        return kakao_login(req.kakao_id, req.nickname, req.profile_image)
+
+    return {"error": "code+redirect_uri 또는 kakao_id가 필요합니다"}
 
 
 @router.get("/config")

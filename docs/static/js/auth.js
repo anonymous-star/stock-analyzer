@@ -94,60 +94,29 @@ const Auth = {
     });
   },
 
-  // 카카오 로그인
+  // 카카오 로그인 (SDK v2 — redirect flow)
   async kakaoLogin() {
-    // SDK 로드 대기
     await this._waitForKakaoSDK();
     if (!this.initKakao()) {
       throw new Error('카카오 SDK 로드에 실패했습니다. 페이지를 새로고침 해주세요.');
     }
-
-    return new Promise((resolve, reject) => {
-      Kakao.Auth.login({
-        success: async (authObj) => {
-          try {
-            // 카카오 유저 정보 요청
-            const userInfo = await this._getKakaoUser();
-            // 백엔드에 카카오 유저 정보 전달
-            const res = await fetch(this._base() + '/auth/kakao', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
-              body: JSON.stringify({
-                kakao_id: String(userInfo.id),
-                nickname: userInfo.nickname,
-                profile_image: userInfo.profile_image || '',
-              }),
-            });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-            this.setAuth(data.token, data.user);
-            resolve(data.user);
-          } catch (err) {
-            reject(err);
-          }
-        },
-        fail: (err) => {
-          reject(new Error('카카오 로그인 실패'));
-        },
-      });
-    });
+    // Redirect to Kakao login — page navigates away
+    const redirectUri = window.location.origin + window.location.pathname;
+    Kakao.Auth.authorize({ redirectUri });
   },
 
-  _getKakaoUser() {
-    return new Promise((resolve, reject) => {
-      Kakao.API.request({
-        url: '/v2/user/me',
-        success: (res) => {
-          const profile = res.kakao_account?.profile || {};
-          resolve({
-            id: res.id,
-            nickname: profile.nickname || '',
-            profile_image: profile.thumbnail_image_url || '',
-          });
-        },
-        fail: (err) => reject(new Error('카카오 유저 정보 조회 실패')),
-      });
+  // 카카오 OAuth 콜백 처리 (App.init에서 호출)
+  async handleKakaoCallback(code) {
+    const redirectUri = window.location.origin + window.location.pathname;
+    const res = await fetch(this._base() + '/auth/kakao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    this.setAuth(data.token, data.user);
+    return data.user;
   },
 
   async verify() {

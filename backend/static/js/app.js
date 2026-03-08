@@ -10,15 +10,34 @@ const App = {
     this._setupSellModal();
     this._setupUserMenu();
     this._updateAuthUI();
-    // 카카오 앱 키 로드 후 라우팅 (로그인 페이지에서 카카오 버튼 표시)
+
+    // 카카오 앱 키 로드
     try {
       const cfg = await fetch('/auth/config').then(r => r.json());
-      if (cfg.kakao_js_key) {
-        Auth.KAKAO_APP_KEY = cfg.kakao_js_key;
-        Auth.initKakao();
-      }
+      if (cfg.kakao_js_key) Auth.KAKAO_APP_KEY = cfg.kakao_js_key;
     } catch {}
+
+    // 카카오 OAuth 콜백 처리 (?code= param)
+    await this._handleKakaoOAuthCallback();
+
     this._route();
+  },
+
+  async _handleKakaoOAuthCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (!code) return;
+    // URL에서 code 제거
+    history.replaceState(null, '', window.location.pathname + (window.location.hash || '#/'));
+    try {
+      await Auth.handleKakaoCallback(code);
+      this._updateAuthUI();
+      clearApiCache();
+      App.toast('카카오 로그인 성공', 'success');
+    } catch (e) {
+      console.error('Kakao callback error:', e);
+      App.toast('카카오 로그인 실패: ' + e.message, 'error');
+    }
   },
 
   _setupTheme() {

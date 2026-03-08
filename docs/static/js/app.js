@@ -10,9 +10,28 @@ const App = {
     this._setupSellModal();
     this._setupUserMenu();
     this._updateAuthUI();
-    // 카카오 SDK 초기화 (config.js에서 키 로드) — 라우팅 전에 초기화해야 로그인 페이지에 버튼 표시
-    if (Auth.KAKAO_APP_KEY) Auth.initKakao();
+
+    // 카카오 OAuth 콜백 처리 (?code= param)
+    await this._handleKakaoOAuthCallback();
+
     this._route();
+  },
+
+  async _handleKakaoOAuthCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (!code) return;
+    // URL에서 code 제거
+    history.replaceState(null, '', window.location.pathname + (window.location.hash || '#/'));
+    try {
+      await Auth.handleKakaoCallback(code);
+      this._updateAuthUI();
+      clearApiCache();
+      App.toast('카카오 로그인 성공', 'success');
+    } catch (e) {
+      console.error('Kakao callback error:', e);
+      App.toast('카카오 로그인 실패: ' + e.message, 'error');
+    }
   },
 
   _setupTheme() {
