@@ -57,7 +57,7 @@ const TTL = {
 // === API Client ===
 
 const API = {
-  BASE: '',
+  BASE: window.__API_BASE || '',
 
   _authHeaders() {
     const token = Auth.getToken();

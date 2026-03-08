@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+from services.cache_service import get_cached_history, set_cached_history
 try:
     import pandas_ta as ta
     HAS_PANDAS_TA = True
@@ -20,10 +21,15 @@ def _safe_float(val) -> float | None:
 
 def get_technical_indicators(ticker: str) -> dict:
     """Calculate technical indicators for a ticker."""
-    stock = yf.Ticker(ticker)
-    df = stock.history(period="1y", interval="1d")
+    # 캐시 우선
+    df = get_cached_history(ticker, "1y", "1d")
+    if df is None:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1y", interval="1d")
+        if not df.empty:
+            set_cached_history(ticker, "1y", "1d", df)
 
-    if df.empty or len(df) < 20:
+    if df is None or df.empty or len(df) < 20:
         return {"error": "Insufficient data for technical analysis"}
 
     df = df.copy()

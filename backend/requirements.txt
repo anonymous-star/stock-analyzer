@@ -6,5 +6,9 @@ python-dotenv
 httpx
 feedparser
 pandas
+pandas-ta
 numpy
 slowapi
+lightgbm
+scikit-learn
+pyjwt

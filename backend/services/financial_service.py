@@ -1,5 +1,9 @@
 import yfinance as yf
 import math
+from services.cache_service import (
+    get_cached_info, set_cached_info,
+    get_cached_financials, set_cached_financials,
+)
 
 
 def _safe_float(val) -> float | None:
@@ -27,7 +31,12 @@ def _safe_int(val) -> int | None:
 def get_financials(ticker: str) -> dict:
     """Get financial statements and key metrics for a ticker."""
     stock = yf.Ticker(ticker)
-    info = stock.info
+
+    # info 캐시
+    info = get_cached_info(ticker)
+    if info is None:
+        info = stock.info
+        set_cached_info(ticker, info)
 
     result = {
         "ticker": ticker,
@@ -81,10 +90,16 @@ def get_financials(ticker: str) -> dict:
         },
     }
 
-    # Try to get income statement summary
+    # Try to get income statement summary (캐시 우선)
     try:
-        financials = stock.financials
-        if financials is not None and not financials.empty:
+        cached_fin = get_cached_financials(ticker)
+        if cached_fin is not None:
+            financials = cached_fin
+        else:
+            financials = stock.financials
+            if financials is not None and not financials.empty:
+                set_cached_financials(ticker, financials)
+        if financials is not None and not getattr(financials, 'empty', False):
             latest = financials.iloc[:, 0]
             result["annual_income"] = {
                 "year": str(financials.columns[0].year) if hasattr(financials.columns[0], 'year') else str(financials.columns[0]),

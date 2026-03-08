@@ -9,6 +9,7 @@ from services.technical_service import get_technical_indicators
 from services.financial_service import get_financials
 from services.news_service import get_news_headlines
 from services.ai_service import analyze_stock
+from services.recommendation_service import _analyze_single
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -25,13 +26,14 @@ async def analyze(request: Request, ticker: str):
     if not VALID_TICKER.match(ticker):
         raise HTTPException(status_code=400, detail="유효하지 않은 티커 형식입니다")
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         technical_fut = loop.run_in_executor(_executor, get_technical_indicators, ticker)
         financial_fut = loop.run_in_executor(_executor, get_financials, ticker)
         news_fut = loop.run_in_executor(_executor, get_news_headlines, ticker, 5)
+        rule_fut = loop.run_in_executor(_executor, _analyze_single, ticker, False)
 
-        technical_data, financial_data, news_headlines = await asyncio.gather(
-            technical_fut, financial_fut, news_fut
+        technical_data, financial_data, news_headlines, rule_result = await asyncio.gather(
+            technical_fut, financial_fut, news_fut, rule_fut
         )
 
         if "error" in technical_data:
@@ -42,6 +44,7 @@ async def analyze(request: Request, ticker: str):
             technical_data=technical_data,
             financial_data=financial_data,
             news_headlines=news_headlines,
+            rule_based=rule_result,
         )
 
         if "error" in result and result.get("confidence", 0) == 0:

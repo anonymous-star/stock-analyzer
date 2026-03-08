@@ -2,6 +2,10 @@ import yfinance as yf
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from services.kr_stocks import search_kr_stocks
+from services.cache_service import (
+    get_cached_info, set_cached_info,
+    get_cached_history, set_cached_history,
+)
 
 _search_executor = ThreadPoolExecutor(max_workers=2)
 
@@ -46,7 +50,7 @@ US_STOCKS = {
     "WMT": "Walmart", "HD": "Home Depot", "CAT": "Caterpillar",
     "GS": "Goldman Sachs", "MS": "Morgan Stanley", "SQ": "Block (Square)",
     "SNAP": "Snap Inc", "UBER": "Uber", "LYFT": "Lyft",
-    "ROKU": "Roku", "SHOP": "Shopify", "SQ": "Block",
+    "ROKU": "Roku", "SHOP": "Shopify",
     "RBLX": "Roblox", "SOFI": "SoFi Technologies", "RIVN": "Rivian",
     "LCID": "Lucid Group", "NIO": "NIO", "XPEV": "XPeng",
     "LI": "Li Auto", "BABA": "Alibaba", "JD": "JD.com",
@@ -162,13 +166,15 @@ def get_quote(ticker: str) -> dict:
         change = 0.0
         change_percent = 0.0
 
-    history = stock.history(period="1d", interval="1m")
-
-    # Get company name + financial data from full info (single call)
+    # Get company name + financial data from full info (캐시 우선)
     name = ticker
     financials = {}
     try:
-        full_info = stock.info
+        full_info = get_cached_info(ticker)
+        if full_info is None:
+            full_info = stock.info
+            set_cached_info(ticker, full_info)
+
         name = full_info.get("shortName") or full_info.get("longName") or ticker
         # 재무 데이터 추출 (추가 API 호출 없음)
         import math
@@ -212,10 +218,15 @@ def get_quote(ticker: str) -> dict:
 
 def get_price_history(ticker: str, period: str = "6mo", interval: str = "1d") -> list[dict]:
     """Get historical price data."""
-    stock = yf.Ticker(ticker)
-    history = stock.history(period=period, interval=interval)
+    # 캐시 우선
+    history = get_cached_history(ticker, period, interval)
+    if history is None:
+        stock = yf.Ticker(ticker)
+        history = stock.history(period=period, interval=interval)
+        if not history.empty:
+            set_cached_history(ticker, period, interval, history)
 
-    if history.empty:
+    if history is None or history.empty:
         return []
 
     result = []

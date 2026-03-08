@@ -5,9 +5,12 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import math
 
 from services.recommendation_service import DEFAULT_TICKERS
+from services.cache_service import get_cached_history, set_cached_history
+from services.ml_service import predict_confidence as ml_predict
 
 # hold_days별 캐시: {hold_days: {"results": [...], "timestamp": float}}
 _cache: dict[int, dict] = {}
@@ -130,6 +133,10 @@ def _score_at(ind: dict, i: int) -> dict | None:
     else:
         score -= 1
 
+    # 데드크로스 (MA50 < MA200) — 장기 하락추세 감점
+    if not math.isnan(ma50) and not math.isnan(ma200) and ma50 < ma200:
+        score -= 1
+
     # RSI (+2/-1)
     if rsi < 30:
         score += 2
@@ -162,19 +169,19 @@ def _score_at(ind: dict, i: int) -> dict | None:
 
     near_low = pct_from_low < 0.30
 
-    # 거래량 (-3~+4)
+    # 거래량 (-2~+2) — 10년 분석: 급증 시 과열로 적중률 하락, 축소
     prev_price = ind["c"][i - 1] if i > 0 else price
     day_change = (price - prev_price) / prev_price * 100 if prev_price > 0 else 0
     if vol_ratio > 2.0:
         if day_change > 0:
-            score += 3
+            score += 1  # 거래량 급증+상승: 과열 가능, 축소 (3→1)
         elif day_change < -2:
             score -= 2
         else:
-            score += 1
+            score += 0
     elif vol_ratio > 1.5:
         if day_change > 0:
-            score += 2
+            score += 1  # (2→1)
         elif day_change < -2:
             score -= 1
     elif vol_ratio < 0.5:
@@ -182,7 +189,7 @@ def _score_at(ind: dict, i: int) -> dict | None:
     if day_change > 1 and vol_ratio > 1.3:
         score += 1
 
-    # 모멘텀/반등 보호
+    # 모멘텀/반등 보호 — 10년 분석: 조정 후 반등이 가장 효과적
     c = ind["c"]
     mom5 = (price - c[i - 5]) / c[i - 5] * 100 if i >= 5 and c[i - 5] > 0 else 0
     mom10 = (price - c[i - 10]) / c[i - 10] * 100 if i >= 10 and c[i - 10] > 0 else 0
@@ -199,6 +206,104 @@ def _score_at(ind: dict, i: int) -> dict | None:
         score += 1
     if down_streak >= 3 and near_low:
         score += 1
+
+    # 10년 교정 보너스: 조정 후 반등 (적중률 66%)
+    trend_20d_raw = None
+    if i >= 20 and c[i - 20] > 0:
+        trend_20d_raw = (price - c[i - 20]) / c[i - 20] * 100
+    volatility_raw = ind["std20"][i] / price * 100 if price > 0 and not math.isnan(ind["std20"][i]) else None
+
+    if trend_20d_raw is not None and trend_20d_raw < 0 and volatility_raw is not None and volatility_raw <= 4:
+        score += 2  # 조정 후 반등 + 저변동성: 적중률 66%
+
+    # 변동성 직접 페널티 (고변동성 = 예측 어려움)
+    if volatility_raw is not None:
+        if volatility_raw > 5:
+            score -= 2  # 매우 높은 변동성
+        elif volatility_raw > 4:
+            score -= 1  # 높은 변동성
+
+    # 과열 감점: 고변동성 + 거래량 급증은 위험
+    if volatility_raw is not None and volatility_raw > 4 and vol_ratio > 1.5:
+        score -= 1
+
+    # === 최근 트렌드 가중 (-3~+4) ===
+    # RSI 5일 변화
+    _rsi_change_raw = None
+    if i >= 5:
+        _g2 = ind["rsi_gain"][i - 5]
+        _l2 = ind["rsi_loss"][i - 5]
+        _rs2 = _g2 / _l2 if _l2 != 0 else 100
+        _rsi_prev = 100 - (100 / (1 + _rs2))
+        _rsi_change_raw = rsi - _rsi_prev
+
+    if _rsi_change_raw is not None:
+        if 3 <= _rsi_change_raw <= 15:
+            score += 1
+        elif _rsi_change_raw < -10:
+            score -= 1
+
+    # MA20 기울기
+    _ma20_slope_raw = None
+    if i >= 5:
+        _ma20_prev = ind["ma20"][i - 5]
+        if _ma20_prev > 0 and not math.isnan(_ma20_prev):
+            _ma20_slope_raw = (ma20 - _ma20_prev) / _ma20_prev * 100
+
+    if _ma20_slope_raw is not None:
+        if _ma20_slope_raw > 0.5:
+            score += 1
+        elif _ma20_slope_raw < -0.5:
+            score -= 1
+
+    # MACD 가속도
+    _macd_accel_raw = None
+    if i >= 1:
+        _macd_accel_raw = ind["macd_hist"][i] - ind["macd_hist"][i - 1]
+
+    if _macd_accel_raw is not None:
+        if _macd_accel_raw > 0.1:
+            score += 1
+        elif _macd_accel_raw < -0.3:
+            score -= 1
+
+    # 20일 하락 중 5일 반등 → 추세 전환
+    if trend_20d_raw is not None and trend_20d_raw < -3 and mom5 > 1:
+        score += 1
+
+    # === 연구 기반 신규 신호 (v6.1) ===
+
+    # RSI 다이버전스: 가격 20일 하락인데 RSI 상승 → 반전 임박 (+1, 적중 60.9%)
+    rsi_divergence = 0
+    if i >= 20:
+        _g20 = ind["rsi_gain"][i - 20]
+        _l20 = ind["rsi_loss"][i - 20]
+        _rs20 = _g20 / _l20 if _l20 != 0 else 100
+        _rsi_20ago = 100 - (100 / (1 + _rs20))
+        if trend_20d_raw is not None and trend_20d_raw < 0 and rsi > _rsi_20ago:
+            rsi_divergence = 1
+            score += 1
+
+    # 골든크로스 근접: MA20이 MA50 부근 (±2%) → 추세 전환 가능 (+1, 수익 +1.07%)
+    golden_near = 0
+    if not math.isnan(ma20) and not math.isnan(ma50) and ma50 > 0:
+        ma_gap = (ma20 - ma50) / ma50 * 100
+        if -1 <= ma_gap <= 2:
+            golden_near = 1
+            score += 1
+
+    # 매도 고갈: 하락 중 거래량 50% 이하 감소 → 매도 압력 소진 (+1, 수익 +1.46%)
+    vol_dry = 0
+    if i >= 9 and trend_20d_raw is not None and trend_20d_raw < 0:
+        recent_vol = float(np.mean(ind["v"][i - 4:i + 1]))
+        prev_vol = float(np.mean(ind["v"][i - 9:i - 4]))
+        if prev_vol > 0 and recent_vol / prev_vol < 0.7:
+            vol_dry = 1
+            score += 1
+
+    # 콤보 보너스: RSI<30 + 저변동성(<3%) + MACD↑ → 적중 77.4%, 수익 +3.77%
+    if rsi < 30 and volatility_raw is not None and volatility_raw < 3 and _macd_accel_raw is not None and _macd_accel_raw > 0:
+        score += 2  # 최강 콤보 보너스
 
     # 품질 지표
     volatility = None
@@ -247,6 +352,9 @@ def _score_at(ind: dict, i: int) -> dict | None:
         "ma20_slope": ma20_slope,
         "macd_accel": macd_accel,
         "trend_20d": trend_20d,
+        "rsi_divergence": rsi_divergence,
+        "golden_near": golden_near,
+        "vol_dry": vol_dry,
     }
 
 
@@ -254,86 +362,53 @@ def _calc_backtest_confidence(score: int, signals: dict) -> int:
     """백테스트용 확신도 계산 (_calc_confidence와 동일 로직)."""
     abs_score = abs(score)
 
-    if score >= 4:  # BUY
+    if score >= 5:  # BUY
+        # 기본 점수: 원점수 기반 (점수 차이를 크게)
         if abs_score >= 12:
-            base = 85
+            base = 88
         elif abs_score >= 10:
-            base = 80
+            base = 83
         elif abs_score >= 8:
-            base = 76
+            base = 78
+        elif abs_score >= 7:
+            base = 73
         elif abs_score >= 6:
-            base = 72
-        elif abs_score >= 4:
-            base = 60
+            base = 65
         else:
-            base = 55
+            base = 55  # score 5
 
-        # 품질 조정 (10년 160건 교정)
+        # 품질 조정 (축소된 가중치, 감점 위주)
         volatility = signals.get("volatility")
         bb_width = signals.get("bb_width")
-        rsi_change = signals.get("rsi_change")
-        ma20_slope = signals.get("ma20_slope")
         mom5 = signals.get("mom5", 0)
         macd_accel = signals.get("macd_accel")
         down_streak = signals.get("down_streak", 0)
         trend_20d = signals.get("trend_20d")
+        vol_ratio = signals.get("vol_ratio", 1.0)
 
-        if volatility is not None:
-            if volatility > 4:
-                base -= 12
-            elif 2 <= volatility <= 3:
-                base += 3
-            elif volatility <= 4:
-                base += 1
-
-        if bb_width is not None:
-            if bb_width > 12:
-                base -= 8
-            elif 8 <= bb_width <= 12:
-                base += 2
-
-        if rsi_change is not None:
-            if rsi_change < -5:
-                base -= 6
-            elif 0 <= rsi_change <= 5:
-                base += 3
-            elif rsi_change > 5:
-                base -= 3
-
-        if ma20_slope is not None:
-            if 0 < ma20_slope <= 0.5:
-                base -= 6
-            elif ma20_slope > 1:
-                base += 2
-
-        if mom5 is not None:
-            if 0 <= mom5 < 3:
-                base -= 5
-            elif mom5 >= 3:
-                base += 3
-            elif mom5 < -5:
-                base -= 6
-
-        if trend_20d is not None:
-            if 5 <= trend_20d <= 10:
-                base -= 6
-            elif -5 <= trend_20d < 0:
-                base += 4
-
-        if macd_accel is not None:
-            if macd_accel >= 0.5:
-                base += 3
-            elif macd_accel >= 0.1:
-                base += 1
-            elif macd_accel < -0.5:
-                base -= 4
-
+        # 감점 요인 (위험 신호만 감점, 보너스 최소화)
+        if volatility is not None and volatility > 4:
+            base -= 8   # 고변동성 감점 (15→8)
+        if vol_ratio > 2.0:
+            base -= 4   # 거래량 급증 과열 (6→4)
+        if bb_width is not None and bb_width > 15:
+            base -= 4   # 극단적 BB 폭 (8→4)
         if down_streak >= 3:
-            base -= 5
-        elif down_streak >= 2:
-            base -= 3
+            base -= 4   # 연속 하락 (5→4)
+        if macd_accel is not None and macd_accel < -0.5:
+            base -= 3   # 추세 악화 (4→3)
+        if trend_20d is not None and 5 <= trend_20d <= 10:
+            base -= 3   # 미지근한 상승 (4→3)
 
-    elif score <= -4:  # SELL
+        # 보너스 (보수적, 최대 +4)
+        bonus = 0
+        if volatility is not None and 2 <= volatility <= 3:
+            bonus += 2
+        if trend_20d is not None and -5 <= trend_20d < 0:
+            bonus += 2  # 조정 후 반등
+        base += min(bonus, 4)
+
+    elif score <= -5:  # SELL
         if abs_score >= 10:
             base = 80
         elif abs_score >= 8:
@@ -369,9 +444,14 @@ def _confidence_tier(confidence: int) -> str:
 def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7) -> dict | None:
     """단일 종목 백테스트: 10년 슬라이딩 윈도우 (7일 간격 샘플링)."""
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="10y", interval="1d")
-        if df.empty or len(df) < 220:
+        # 10년 데이터 캐시 우선 (가장 큰 효과)
+        df = get_cached_history(ticker, "10y", "1d")
+        if df is None:
+            stock = yf.Ticker(ticker)
+            df = stock.history(period="10y", interval="1d")
+            if not df.empty:
+                set_cached_history(ticker, "10y", "1d", df)
+        if df is None or df.empty or len(df) < 220:
             return None
 
         close = df["Close"]
@@ -382,7 +462,9 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
 
         trades = {"BUY": [], "HOLD": [], "SELL": []}
         buy_by_tier = {"매우 강력": [], "강력": [], "양호": [], "보통": []}
+        buy_opportunities = []  # (max_return, tp_return) 수익 기회 추적
         total_signals = 0
+        close_arr = close.values.astype(float)
 
         # 7일 간격 샘플링 (10년 데이터 최적화)
         for i in range(200, len(df) - hold_days, sample_interval):
@@ -392,16 +474,44 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
 
             score = signals["score"]
             entry_price = signals["price"]
-            exit_price = float(close.iloc[i + hold_days])
+            exit_price = float(close_arr[i + hold_days])
             ret = (exit_price - entry_price) / entry_price * 100
 
-            # 백테스트 임계값 (반등 보호 반영, SELL은 더 엄격)
-            if score >= 4:
+            # 백테스트 임계값 (recommendation_service와 동일)
+            if score >= 5:
                 rec = "BUY"
-                confidence = _calc_backtest_confidence(score, signals)
+                # ML 예측 우선, 폴백 규칙
+                ml_features = {**signals}
+                ml_conf = ml_predict(ml_features)
+                confidence = ml_conf if ml_conf is not None else _calc_backtest_confidence(score, signals)
                 tier = _confidence_tier(confidence)
                 buy_by_tier[tier].append(ret)
-            elif score <= -4:
+
+                # 수익 기회 분석 + 동적 손절 시뮬레이션
+                window = close_arr[i + 1: i + hold_days + 1]
+                max_price = float(np.max(window))
+                min_price = float(np.min(window))
+                max_ret = (max_price - entry_price) / entry_price * 100
+                min_ret = (min_price - entry_price) / entry_price * 100
+
+                # 변동성 기반 동적 SL (익절 없음 = 수익 무제한)
+                vol = signals.get("volatility") or 3.0
+                if vol < 2.5:
+                    sl_pct = -3.0
+                elif vol < 4.0:
+                    sl_pct = -5.0
+                else:
+                    sl_pct = -7.0
+
+                sl_ret = ret  # 기본은 만기 수익
+                for j in range(len(window)):
+                    day_ret = (float(window[j]) - entry_price) / entry_price * 100
+                    if day_ret <= sl_pct:
+                        sl_ret = sl_pct
+                        break
+                buy_opportunities.append((max_ret, sl_ret, min_ret))
+
+            elif score <= -5:
                 rec = "SELL"
             else:
                 rec = "HOLD"
@@ -440,11 +550,27 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
         accuracy = round((buy_correct + sell_correct) / total_directional * 100, 1) if total_directional > 0 else 0
 
         name = ticker
-        try:
-            info = stock.fast_info
-            name = ticker  # fast_info doesn't have name
-        except Exception:
-            pass
+
+        # BUY 수익 기회 + 동적 손절 통계
+        buy_opp = {}
+        if buy_opportunities:
+            max_rets = [o[0] for o in buy_opportunities]
+            sl_rets = [o[1] for o in buy_opportunities]
+            min_rets = [o[2] for o in buy_opportunities]
+            opp_1pct = sum(1 for r in max_rets if r >= 1.0)
+            opp_3pct = sum(1 for r in max_rets if r >= 3.0)
+            sl_wins = sum(1 for r in sl_rets if r > 0)
+            sl_stopped = sum(1 for r in sl_rets if r < -2.5)
+            buy_opp = {
+                "opportunity_1pct": round(opp_1pct / len(max_rets) * 100, 1),
+                "opportunity_3pct": round(opp_3pct / len(max_rets) * 100, 1),
+                "avg_max_return": round(sum(max_rets) / len(max_rets), 2),
+                "avg_max_drawdown": round(sum(min_rets) / len(min_rets), 2),
+                "sl_avg_return": round(sum(sl_rets) / len(sl_rets), 2),
+                "sl_hit_rate": round(sl_wins / len(sl_rets) * 100, 1),
+                "sl_stop_rate": round(sl_stopped / len(sl_rets) * 100, 1),
+                "buy_hold_avg_return": buy_stats["avg_return"],
+            }
 
         return {
             "ticker": ticker,
@@ -457,6 +583,7 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
             "sell": sell_stats,
             "hold": hold_stats,
             "buy_tiers": buy_tiers,
+            "buy_opportunity": buy_opp,
         }
     except Exception:
         return None
@@ -472,7 +599,7 @@ async def run_backtest(hold_days: int = 20, limit: int = 10) -> list[dict]:
         return cached["results"][:limit]
 
     pool = DEFAULT_TICKERS
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     futures = [loop.run_in_executor(_executor, _backtest_ticker, t, hold_days) for t in pool]
     raw = await asyncio.gather(*futures)

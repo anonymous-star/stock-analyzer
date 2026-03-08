@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from services.stock_service import get_quote
 from services.technical_service import get_technical_indicators
 from services.sentiment_service import score_headlines
+from services.ml_service import predict_confidence as ml_predict
 
 # 캐시: {"data": [...], "timestamp": float}
 _cache = {"data": None, "timestamp": 0}
@@ -81,8 +82,9 @@ _executor = ThreadPoolExecutor(max_workers=5)
 
 
 # ── 점수 체계 ──
-# 기술적(-7~+8), 재무(-4~+6), 거래량(-3~+4), 모멘텀/반등(-0~+3), 뉴스(-3~+3)
-# 합산 범위: -17 ~ +24
+# 기술적(-7~+8), 재무(-4~+6), 거래량(-3~+4), 모멘텀/반등(0~+3),
+# 최근트렌드(-3~+4), 뉴스(-3~+3)
+# 합산 범위: -20 ~ +28
 # BUY >= 5, SELL <= -5, 나머지 HOLD
 
 
@@ -114,6 +116,12 @@ def _score_technical(tech: dict, quote: dict) -> tuple[int, list[str]]:
             reasons.append("MA200 상회 (장기 강세)")
         else:
             score -= 1
+
+    # 데드크로스 (MA50 < MA200) — 장기 하락추세 감점
+    ma50 = tech.get("ma50")
+    if ma50 and ma200 and ma50 < ma200:
+        score -= 1
+        reasons.append("MA50 < MA200 데드크로스 — 장기 하락추세")
 
     # RSI (+2/-1)
     rsi_signal = signals.get("rsi_signal")
@@ -238,20 +246,20 @@ def _score_volume(tech: dict, change_percent: float | None) -> tuple[int, list[s
         vol_ratio = current_vol / vol_ma20
         change = change_percent or 0
 
+        # 10년 백테스트 교정: 거래량 급증은 과열 신호 (적중률 54.8%)
         if vol_ratio > 2.0:
-            # 거래량 2배 이상 급증
             if change > 0:
-                score += 3
-                reasons.append(f"거래량 급증 {vol_ratio:.1f}x + 상승 — 강한 매수세")
+                score += 1  # 과열 가능, 축소 (3→1)
+                reasons.append(f"거래량 급증 {vol_ratio:.1f}x + 상승 — 과열 주의")
             elif change < -2:
                 score -= 2
                 reasons.append(f"거래량 급증 {vol_ratio:.1f}x + 하락 — 투매 위험")
             else:
-                score += 1
+                score += 0
                 reasons.append(f"거래량 급증 {vol_ratio:.1f}x — 관심 집중")
         elif vol_ratio > 1.5:
             if change > 0:
-                score += 2
+                score += 1  # (2→1)
                 reasons.append(f"거래량 증가 {vol_ratio:.1f}x — 매수세 확인")
             elif change < -2:
                 score -= 1
@@ -263,8 +271,8 @@ def _score_volume(tech: dict, change_percent: float | None) -> tuple[int, list[s
         if change > 1 and vol_ratio > 1.3:
             score += 1
 
-    # 클램핑: -3 ~ +4
-    score = max(-3, min(4, score))
+    # 클램핑: -3 ~ +3 (거래량 과대평가 방지)
+    score = max(-3, min(3, score))
     return score, reasons
 
 
@@ -309,6 +317,58 @@ def _score_momentum(tech: dict, quote: dict) -> tuple[int, list[str]]:
     return score, reasons
 
 
+def _score_recency(tech: dict, quote: dict) -> tuple[int, list[str]]:
+    """
+    최근 트렌드 가중 점수 — 단기 지표에 추가 비중.
+    장기 지표(MA200, 52주)보다 최근 5~20일 변화를 더 반영.
+    반환: (score -3~+4, reasons)
+    """
+    score = 0
+    reasons = []
+
+    rsi_change = tech.get("rsi_change_5d")
+    ma20_slope = tech.get("ma20_slope")
+    macd_accel = tech.get("macd_accel")
+    trend_20d = tech.get("trend_20d")
+    mom5 = tech.get("momentum_5d")
+
+    # RSI 최근 방향: 5일간 RSI 상승/하락 추세
+    if rsi_change is not None:
+        if 3 <= rsi_change <= 15:
+            score += 1
+            reasons.append(f"RSI 5일 +{rsi_change:.0f} — 최근 매수세 유입")
+        elif rsi_change < -10:
+            score -= 1
+            reasons.append(f"RSI 5일 {rsi_change:.0f} — 최근 매도 압력 급증")
+
+    # MA20 기울기: 단기 추세 방향
+    if ma20_slope is not None:
+        if ma20_slope > 0.5:
+            score += 1
+            reasons.append(f"MA20 기울기 +{ma20_slope:.2f}% — 단기 상승 추세")
+        elif ma20_slope < -0.5:
+            score -= 1
+            reasons.append(f"MA20 기울기 {ma20_slope:.2f}% — 단기 하락 추세")
+
+    # MACD 가속도: 추세 변화 속도
+    if macd_accel is not None:
+        if macd_accel > 0.1:
+            score += 1
+            reasons.append("MACD 가속 — 상승 추세 강화 중")
+        elif macd_accel < -0.3:
+            score -= 1
+            reasons.append("MACD 감속 — 추세 약화 경고")
+
+    # 20일 추세 + 5일 모멘텀 조합: 조정 후 반등 vs 지속 하락
+    if trend_20d is not None and mom5 is not None:
+        if trend_20d < -3 and mom5 > 1:
+            score += 1  # 20일 하락 중 최근 5일 반등 → 추세 전환 신호
+            reasons.append(f"20일 {trend_20d:+.1f}% 조정 후 5일 반등 — 추세 전환 가능")
+
+    score = max(-3, min(4, score))
+    return score, reasons
+
+
 def _score_news(headlines: list[str]) -> tuple[int, list[str]]:
     """
     뉴스 감성 점수.
@@ -342,19 +402,19 @@ def _calc_confidence(total_score: int, breakdown: dict, tech: dict | None = None
     abs_score = abs(total_score)
 
     if total_score >= 5:
-        # BUY 확신도 (백테스트 교정)
+        # BUY 확신도 (원점수 기반, 점수 차이 크게)
         if abs_score >= 12:
-            base = 85
+            base = 88
         elif abs_score >= 10:
-            base = 80
+            base = 83
         elif abs_score >= 8:
-            base = 76
+            base = 78
+        elif abs_score >= 7:
+            base = 73
         elif abs_score >= 6:
-            base = 72
-        elif abs_score >= 5:
-            base = 60
+            base = 65
         else:
-            base = 55
+            base = 55  # score 5
     elif total_score <= -5:
         # SELL 확신도
         if abs_score >= 10:
@@ -404,80 +464,30 @@ def _calc_confidence(total_score: int, breakdown: dict, tech: dict | None = None
         ma20_slope = tech.get("ma20_slope")
         trend_20d = tech.get("trend_20d")
 
-        if total_score >= 5:  # BUY 품질 조정
-            # 변동성 (임계값 4%로 강화, 10년 데이터 기반)
-            if volatility is not None:
-                if volatility > 4:
-                    base -= 12  # >4% 적중률 ~45% → 강력 감점
-                elif 2 <= volatility <= 3:
-                    base += 3   # 2-3% 최적 구간 (64.1%)
-                elif volatility <= 4:
-                    base += 1   # 3-4% 양호
+        if total_score >= 5:  # BUY 품질 조정 (축소된 가중치)
+            vol_ratio = tech.get("current_volume", 0) / tech.get("volume_ma20", 1) if tech.get("volume_ma20") else 1
 
-            # BB 폭 (10년 160건 분석, 임계값 강화 15→12%)
-            if bb_width is not None:
-                if bb_width > 12:
-                    base -= 8   # >12% 적중률 44.9% → 과도한 변동
-                elif 8 <= bb_width <= 12:
-                    base += 2   # 8-12% 적중률 64.7%
-
-            # RSI 변화 (10년 분석)
-            if rsi_change is not None:
-                if rsi_change < -5:
-                    base -= 6   # 적중률 37.5% → RSI 급락 중 진입은 위험
-                elif 0 <= rsi_change <= 5:
-                    base += 3   # 적중률 66.7% → 안정적 회복
-                elif rsi_change > 5:
-                    base -= 3   # 적중률 52.9-58% → 급반등 되돌림 위험
-
-            # MA20 기울기 (약한 상승 함정 감지)
-            if ma20_slope is not None:
-                if 0 < ma20_slope <= 0.5:
-                    base -= 6   # 적중률 43.8% → 약한 상승 함정
-                elif ma20_slope > 1:
-                    base += 2   # 적중률 57%+ → 확실한 추세
-
-            # 5일 모멘텀 (0-3% 함정 구간 감지, 10년 160건 분석)
-            if mom5 is not None:
-                if 0 <= mom5 < 3:
-                    base -= 5   # 적중률 44.4% → 약한 상승 함정
-                elif mom5 >= 3:
-                    base += 3   # 적중률 61% → 확실한 상승
-                elif mom5 < -5:
-                    base -= 6   # 적중률 낮음
-
-            # 20일 추세 (10년 160건 분석)
-            if trend_20d is not None:
-                if 5 <= trend_20d <= 10:
-                    base -= 6   # 적중률 47.9% → 미지근한 상승 함정
-                elif -5 <= trend_20d < 0:
-                    base += 4   # 적중률 86.7% → 조정 후 반등
-
-            # MACD 가속도
-            if macd_accel is not None:
-                if macd_accel >= 0.5:
-                    base += 3   # 적중률 69.6% → 강한 추세 개선
-                elif macd_accel >= 0.1:
-                    base += 1   # 적중률 55.9%
-                elif macd_accel < -0.5:
-                    base -= 4   # 추세 악화
-
-            # 하락 연속일
+            # 감점 요인 (위험 신호만 감점, 보너스 최소화)
+            if volatility is not None and volatility > 4:
+                base -= 8   # 고변동성 감점
+            if vol_ratio > 2.0:
+                base -= 4   # 거래량 급증 과열
+            if bb_width is not None and bb_width > 15:
+                base -= 4   # 극단적 BB 폭
             if down_streak >= 3:
-                base -= 5   # 반등 기대보다 추가 하락 위험
-            elif down_streak >= 2:
-                base -= 3
+                base -= 4   # 연속 하락
+            if macd_accel is not None and macd_accel < -0.5:
+                base -= 3   # 추세 악화
+            if trend_20d is not None and 5 <= trend_20d <= 10:
+                base -= 3   # 미지근한 상승
 
-            # 계절성 (7-9월 약세, 10년 분석)
-            import datetime
-            try:
-                month = datetime.date.today().month
-                if 7 <= month <= 9:
-                    base -= 4   # 적중률 35.7% → 여름 약세
-                elif month in (4, 5, 6, 10, 11, 12):
-                    base += 2   # 적중률 68-70%
-            except Exception:
-                pass
+            # 보너스 (보수적, 최대 +4)
+            bonus = 0
+            if volatility is not None and 2 <= volatility <= 3:
+                bonus += 2
+            if trend_20d is not None and -5 <= trend_20d < 0:
+                bonus += 2  # 조정 후 반등
+            base += min(bonus, 4)
 
         elif total_score <= -5:  # SELL 품질 조정
             if volatility is not None and volatility > 5:
@@ -516,7 +526,10 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
             # 4. 모멘텀/반등 보호 (0 ~ +3)
             mom_score, mom_reasons = _score_momentum(tech, quote)
 
-            # 5. 뉴스 점수 (-3 ~ +3) — 기본 스캔에서는 제외 (속도)
+            # 5. 최근 트렌드 가중 (-3 ~ +4)
+            rec_score, rec_reasons = _score_recency(tech, quote)
+
+            # 6. 뉴스 점수 (-3 ~ +3) — 기본 스캔에서는 제외 (속도)
             news_score = 0
             news_reasons = []
             if include_news:
@@ -527,8 +540,8 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 except Exception:
                     pass
 
-            # 합산 (-17 ~ +24)
-            total_score = tech_score + fin_score + vol_score + mom_score + news_score
+            # 합산 (-20 ~ +28)
+            total_score = tech_score + fin_score + vol_score + mom_score + rec_score + news_score
 
             # 추천 결정
             if total_score >= 5:
@@ -539,7 +552,7 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 rec = "HOLD"
 
             # 모든 이유 합치기 (최대 5개)
-            all_reasons = tech_reasons + fin_reasons + vol_reasons + mom_reasons + news_reasons
+            all_reasons = tech_reasons + fin_reasons + vol_reasons + mom_reasons + rec_reasons + news_reasons
 
             # 거래량 비율 계산
             vol_ratio = None
@@ -553,10 +566,66 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "financial": fin_score,
                 "volume": vol_score,
                 "momentum": mom_score,
+                "recency": rec_score,
                 "news": news_score,
             }
 
-            confidence = _calc_confidence(total_score, breakdown, tech)
+            # 시장 레짐 기반 BUY 억제 (하락장 회피)
+            try:
+                from services.ml_service import get_current_market_features
+                is_korean = ticker.endswith((".KS", ".KQ"))
+                mkt = get_current_market_features(is_korean)
+                mkt_breadth = mkt.get("market_breadth", 1.5)
+                mkt_trend = mkt.get("market_trend_20d", 0)
+                # 하락장: BUY 임계값 상향 (score 5 → 7)
+                if mkt_breadth == 0 and total_score < 7:
+                    if total_score >= 5:
+                        rec = "HOLD"  # 하락장에서 약한 BUY는 HOLD로 강등
+                # 약세장: score 5는 HOLD로
+                elif mkt_breadth <= 1 and mkt_trend < -3 and total_score == 5:
+                    rec = "HOLD"
+            except Exception:
+                pass
+
+            # ML 예측 우선, 폴백 규칙
+            ml_conf = None
+            if total_score >= 5:
+                ml_features = {
+                    "score": total_score,
+                    "rsi": tech.get("rsi") or 0,
+                    "vol_ratio": (tech.get("current_volume", 0) / tech.get("volume_ma20", 1)) if tech.get("volume_ma20") else 1,
+                    "mom5": tech.get("momentum_5d") or 0,
+                    "down_streak": tech.get("down_streak", 0),
+                    "volatility": tech.get("volatility") or 0,
+                    "bb_width": tech.get("bb_width") or 0,
+                    "rsi_change": tech.get("rsi_change_5d") or 0,
+                    "ma20_slope": tech.get("ma20_slope") or 0,
+                    "macd_accel": tech.get("macd_accel") or 0,
+                    "trend_20d": tech.get("trend_20d") or 0,
+                    "tech_score": tech_score,
+                    "fin_score": fin_score,
+                    "vol_score": vol_score,
+                }
+                ml_conf = ml_predict(ml_features)
+            confidence = ml_conf if ml_conf is not None else _calc_confidence(total_score, breakdown, tech)
+
+            # BUY 시 익절/손절 가이드
+            trade_guide = None
+            if rec == "BUY":
+                vol_pct = tech.get("volatility") or 3
+                # 변동성 기반 동적 익절/손절
+                if vol_pct < 2.5:
+                    tp, sl = 3.0, -3.0
+                elif vol_pct < 4:
+                    tp, sl = 5.0, -5.0
+                else:
+                    tp, sl = 7.0, -7.0
+                trade_guide = {
+                    "take_profit": tp,
+                    "stop_loss": sl,
+                    "hold_days": 20,
+                    "strategy": f"{tp:.0f}% 도달 시 익절, {sl:.0f}% 이탈 시 손절, 최대 20일 보유"
+                }
 
             return {
                 "ticker": ticker,
@@ -566,7 +635,7 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "currency": quote.get("currency"),
                 "recommendation": rec,
                 "score": total_score,
-                "max_score": 24,
+                "max_score": 28,
                 "confidence": confidence,
                 "score_breakdown": breakdown,
                 "reasons": all_reasons[:5],
@@ -574,6 +643,7 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "ma_trend": (tech.get("signals") or {}).get("ma_trend"),
                 "pe_ratio": financials.get("pe_ratio"),
                 "volume_ratio": vol_ratio,
+                "trade_guide": trade_guide,
             }
         except Exception:
             if attempt == 0:
@@ -597,7 +667,7 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     pool = tickers if tickers else DEFAULT_TICKERS
     # 기본 풀 스캔에서는 뉴스 제외, 소수 커스텀 티커일 때만 포함
     include_news = tickers is not None and len(tickers) <= 10
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     futures = [loop.run_in_executor(_executor, _analyze_single, t, include_news) for t in pool]
     raw_results = await asyncio.gather(*futures)

@@ -4,7 +4,7 @@ import re
 from groq import Groq
 
 
-def _build_prompt(ticker: str, technical_data: dict, financial_data: dict, news_headlines: list[str]) -> str:
+def _build_prompt(ticker: str, technical_data: dict, financial_data: dict, news_headlines: list[str], rule_based: dict | None = None) -> str:
     tech_lines = [f"티커: {ticker}"]
     if technical_data:
         price = technical_data.get("current_price")
@@ -52,6 +52,21 @@ def _build_prompt(ticker: str, technical_data: dict, financial_data: dict, news_
 
     news_text = "\n".join(f"- {h}" for h in news_headlines[:5]) if news_headlines else "뉴스 없음"
 
+    # 규칙 기반 분석 결과
+    rule_text = "없음"
+    if rule_based:
+        rec = rule_based.get("recommendation", "HOLD")
+        score = rule_based.get("score", 0)
+        conf = rule_based.get("confidence", 0)
+        reasons = rule_based.get("reasons", [])
+        bd = rule_based.get("score_breakdown", {})
+        rule_text = (
+            f"추천: {rec} (점수 {score:+d}/28, 확신도 {conf}%)\n"
+            f"  세부: 기술적={bd.get('technical', 0)}, 재무={bd.get('financial', 0)}, "
+            f"거래량={bd.get('volume', 0)}, 모멘텀={bd.get('momentum', 0)}, 최근추세={bd.get('recency', 0)}\n"
+            f"  근거: {'; '.join(reasons[:5])}"
+        )
+
     return f"""당신은 전문 주식 애널리스트입니다. 아래 데이터를 바탕으로 {ticker} 종목을 분석해주세요.
 
 ## 기술적 분석 데이터
@@ -63,7 +78,11 @@ def _build_prompt(ticker: str, technical_data: dict, financial_data: dict, news_
 ## 최근 뉴스 헤드라인
 {news_text}
 
-위 데이터를 종합하여 다음 형식의 JSON으로만 응답해주세요. 코드블록(```)이나 다른 텍스트 없이 순수 JSON만 반환하세요:
+## 정량 분석 시스템 결과 (참고: 이 결과와 일관성 있게 분석해주세요)
+{rule_text}
+
+위 데이터를 종합하여 다음 형식의 JSON으로만 응답해주세요. 코드블록(```)이나 다른 텍스트 없이 순수 JSON만 반환하세요.
+중요: 정량 분석 시스템의 결과를 존중하되, 명확한 근거가 있을 때만 다른 의견을 제시하세요.
 
 {{
   "recommendation": "BUY" 또는 "HOLD" 또는 "SELL",
@@ -108,6 +127,7 @@ async def analyze_stock(
     technical_data: dict,
     financial_data: dict,
     news_headlines: list[str],
+    rule_based: dict | None = None,
 ) -> dict:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -118,14 +138,18 @@ async def analyze_stock(
             "overall_summary": "API 키가 설정되지 않아 분석을 수행할 수 없습니다.",
         }
 
+    import asyncio
     client = Groq(api_key=api_key)
-    prompt = _build_prompt(ticker, technical_data, financial_data, news_headlines)
+    prompt = _build_prompt(ticker, technical_data, financial_data, news_headlines, rule_based)
 
-    response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
+    def _call_llm():
+        return client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+
+    response = await asyncio.to_thread(_call_llm)
 
     analysis = parse_analysis_response(response.choices[0].message.content)
     analysis["ticker"] = ticker

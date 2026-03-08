@@ -11,14 +11,8 @@ const App = {
     this._setupUserMenu();
     this._updateAuthUI();
     this._route();
-    // 카카오 앱 키 로드 (비동기, 실패해도 무관)
-    try {
-      const cfg = await fetch('/auth/config').then(r => r.json());
-      if (cfg.kakao_js_key) {
-        Auth.KAKAO_APP_KEY = cfg.kakao_js_key;
-        Auth.initKakao();
-      }
-    } catch {}
+    // 카카오 SDK 초기화 (config.js에서 키 로드)
+    if (Auth.KAKAO_APP_KEY) Auth.initKakao();
   },
 
   _setupTheme() {
@@ -160,7 +154,7 @@ const App = {
       btn.textContent = 'Processing...';
 
       try {
-        const res = await fetch('/portfolio/buy', {
+        const res = await fetch(API.BASE + '/portfolio/buy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...API._authHeaders() },
           body: JSON.stringify({
@@ -237,7 +231,7 @@ const App = {
       btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg> Processing...';
 
       try {
-        const res = await fetch('/portfolio/sell', {
+        const res = await fetch(API.BASE + '/portfolio/sell', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...API._authHeaders() },
           body: JSON.stringify({ ticker, quantity, reason }),
