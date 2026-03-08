@@ -102,7 +102,7 @@ const Auth = {
     }
     // Redirect to Kakao login — page navigates away
     const redirectUri = window.location.origin + window.location.pathname;
-    Kakao.Auth.authorize({ redirectUri, scope: 'profile_nickname,profile_image', prompt: 'login' });
+    Kakao.Auth.authorize({ redirectUri, scope: 'profile_nickname,profile_image' });
   },
 
   // 카카오 OAuth 콜백 처리 (App.init에서 호출)
