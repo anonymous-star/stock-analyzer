@@ -10,9 +10,9 @@ const App = {
     this._setupSellModal();
     this._setupUserMenu();
     this._updateAuthUI();
-    this._route();
-    // 카카오 SDK 초기화 (config.js에서 키 로드)
+    // 카카오 SDK 초기화 (config.js에서 키 로드) — 라우팅 전에 초기화해야 로그인 페이지에 버튼 표시
     if (Auth.KAKAO_APP_KEY) Auth.initKakao();
+    this._route();
   },
 
   _setupTheme() {
