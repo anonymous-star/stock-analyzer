@@ -2,7 +2,7 @@
 
 const LoginView = {
   render(container) {
-    const kakaoAvailable = Auth.KAKAO_APP_KEY && Auth.initKakao();
+    const kakaoAvailable = !!Auth.KAKAO_APP_KEY;
 
     container.innerHTML = `
       <div class="auth-page">
