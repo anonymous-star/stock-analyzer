@@ -1,4 +1,7 @@
 import os
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -12,14 +15,56 @@ from slowapi.errors import RateLimitExceeded
 
 from routers import stocks, analysis, recommendations, backtest, portfolio, auth
 
+logger = logging.getLogger("stock-analyzer")
+
 load_dotenv()
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+
+REFRESH_INTERVAL = 4 * 3600  # 4시간
+
+
+async def _background_refresh():
+    """4시간마다 추천 + 백테스트 캐시를 백그라운드에서 갱신."""
+    await asyncio.sleep(30)  # 서버 시작 30초 후 첫 실행
+    while True:
+        try:
+            logger.info("[Scheduler] 추천/백테스트 캐시 갱신 시작")
+            from services.recommendation_service import get_recommendations
+            from services.backtest_service import run_backtest
+
+            # 추천 갱신
+            await get_recommendations(limit=100)
+            logger.info("[Scheduler] 추천 캐시 갱신 완료")
+
+            # 백테스트 갱신 (20, 40, 60일)
+            for hd in [20, 40, 60]:
+                await run_backtest(hold_days=hd, limit=100)
+                logger.info(f"[Scheduler] 백테스트 {hd}일 캐시 갱신 완료")
+
+        except Exception as e:
+            logger.error(f"[Scheduler] 캐시 갱신 실패: {e}")
+
+        await asyncio.sleep(REFRESH_INTERVAL)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서버 시작/종료 lifecycle."""
+    task = asyncio.create_task(_background_refresh())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
 
 app = FastAPI(
     title="Stock Analyzer API",
     description="한국/미국 주식 분석 및 AI 기반 투자 추천 API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter

@@ -8,7 +8,7 @@ from services.ml_service import predict_confidence as ml_predict
 
 # 캐시: {"data": [...], "timestamp": float}
 _cache = {"data": None, "timestamp": 0}
-CACHE_TTL = 3600  # 1시간
+CACHE_TTL = 14400  # 4시간
 
 # 분석 대상 종목 풀
 DEFAULT_TICKERS = [

@@ -14,7 +14,7 @@ from services.ml_service import predict_confidence as ml_predict
 
 # hold_days별 캐시: {hold_days: {"results": [...], "timestamp": float}}
 _cache: dict[int, dict] = {}
-CACHE_TTL = 28800  # 8시간
+CACHE_TTL = 14400  # 4시간
 
 
 def clear_backtest_cache():
