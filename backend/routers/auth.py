@@ -43,9 +43,10 @@ async def api_kakao_login(req: KakaoCodeRequest):
     # New: authorization code → token → user info
     if req.code and req.redirect_uri:
         import httpx
-        rest_key = os.getenv("KAKAO_REST_KEY", "")
-        if not rest_key:
-            return {"error": "서버에 KAKAO_REST_KEY가 설정되지 않았습니다"}
+        # Kakao.Auth.authorize()는 JS키로 인증하므로 토큰 교환도 JS키 사용
+        app_key = os.getenv("KAKAO_JS_KEY", "")
+        if not app_key:
+            return {"error": "서버에 KAKAO_JS_KEY가 설정되지 않았습니다"}
 
         async with httpx.AsyncClient() as client:
             # 1. Exchange code for access token
@@ -53,7 +54,7 @@ async def api_kakao_login(req: KakaoCodeRequest):
                 "https://kauth.kakao.com/oauth/token",
                 data={
                     "grant_type": "authorization_code",
-                    "client_id": rest_key,
+                    "client_id": app_key,
                     "redirect_uri": req.redirect_uri,
                     "code": req.code,
                 },
