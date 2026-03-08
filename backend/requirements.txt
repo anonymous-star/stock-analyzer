@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
-yfinance
+yfinance>=0.2.43
+curl_cffi
 groq
 python-dotenv
 httpx
