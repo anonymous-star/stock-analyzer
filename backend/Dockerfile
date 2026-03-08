@@ -8,8 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# numba 빌드 방지 (pandas-ta 선택적 의존성)
-ENV NUMBA_DISABLE_JIT=1
+
+# pandas-ta가 numba를 끌어오는데 빌드 실패하므로,
+# 1) pandas-ta를 의존성 없이 먼저 설치
+# 2) 나머지 패키지 설치 (pandas-ta는 이미 있으므로 skip)
 RUN pip install --no-cache-dir --no-deps pandas-ta && \
     pip install --no-cache-dir -r requirements.txt
 
