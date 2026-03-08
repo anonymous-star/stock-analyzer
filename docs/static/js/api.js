@@ -61,7 +61,7 @@ const API = {
 
   _authHeaders() {
     const token = Auth.getToken();
-    const headers = {};
+    const headers = { 'ngrok-skip-browser-warning': '1' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
     return headers;
   },

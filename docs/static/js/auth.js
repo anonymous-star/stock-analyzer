@@ -46,7 +46,7 @@ const Auth = {
   async login(username, password) {
     const res = await fetch(this._base() + '/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
       body: JSON.stringify({ username, password }),
     });
     const data = await res.json();
@@ -58,7 +58,7 @@ const Auth = {
   async register(username, password, displayName) {
     const res = await fetch(this._base() + '/auth/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
       body: JSON.stringify({ username, password, display_name: displayName }),
     });
     const data = await res.json();
@@ -95,7 +95,7 @@ const Auth = {
             // 백엔드에 카카오 유저 정보 전달
             const res = await fetch(this._base() + '/auth/kakao', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
               body: JSON.stringify({
                 kakao_id: String(userInfo.id),
                 nickname: userInfo.nickname,
@@ -139,7 +139,7 @@ const Auth = {
     if (!token) return false;
     try {
       const res = await fetch(this._base() + '/auth/me', {
-        headers: { 'Authorization': 'Bearer ' + token },
+        headers: { 'Authorization': 'Bearer ' + token, 'ngrok-skip-browser-warning': '1' },
       });
       const data = await res.json();
       if (data.error) {

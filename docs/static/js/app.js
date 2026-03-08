@@ -156,7 +156,7 @@ const App = {
       try {
         const res = await fetch(API.BASE + '/portfolio/buy', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...API._authHeaders() },
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1', ...API._authHeaders() },
           body: JSON.stringify({
             ticker, name, quantity: qty,
             tp_pct: tp, sl_pct: sl, hold_days: hold,
@@ -233,7 +233,7 @@ const App = {
       try {
         const res = await fetch(API.BASE + '/portfolio/sell', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...API._authHeaders() },
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1', ...API._authHeaders() },
           body: JSON.stringify({ ticker, quantity, reason }),
         });
         const data = await res.json();
