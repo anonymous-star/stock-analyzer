@@ -5,7 +5,6 @@ const DashboardView = {
     // 진행률 표시 로딩 UI
     container.innerHTML = `
       <div class="dash-loading" id="dash-loading">
-        <div class="spinner"></div>
         <div class="spinner-text" id="dash-loading-text">종목 분석 준비 중...</div>
         <div class="dash-progress-bar" id="dash-progress-wrap" style="display:none">
           <div class="dash-progress-fill" id="dash-progress-fill" style="width:0%"></div>

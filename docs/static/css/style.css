@@ -746,7 +746,7 @@ a:hover { color: var(--accent-hover); }
 .spinner {
   width: 36px; height: 36px;
   border: 3px solid var(--border); border-top-color: var(--accent);
-  border-radius: 50%; animation: spin .7s linear infinite;
+  border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner-text { color: var(--text-muted); font-size: .85rem; font-weight: 500; }
