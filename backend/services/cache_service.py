@@ -12,9 +12,9 @@ _DB_PATH = os.path.join(_DB_DIR, "cache.db")
 
 # TTL (초)
 TTL_HISTORY_SHORT = 4 * 3600    # 가격 히스토리 1d interval: 4시간
-TTL_HISTORY_LONG = 24 * 3600    # 가격 히스토리 10y, 1y 등: 24시간
-TTL_INFO = 12 * 3600            # 회사 정보 (stock.info): 12시간
-TTL_FINANCIALS = 24 * 3600      # 재무 데이터 (stock.financials): 24시간
+TTL_HISTORY_LONG = 72 * 3600    # 가격 히스토리 10y, 1y 등: 72시간 (3일)
+TTL_INFO = 24 * 3600            # 회사 정보 (stock.info): 24시간
+TTL_FINANCIALS = 72 * 3600      # 재무 데이터 (stock.financials): 72시간 (3일)
 
 _local = threading.local()
 
