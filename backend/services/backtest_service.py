@@ -18,6 +18,7 @@ CACHE_TTL = 24 * 3600  # 24시간 (10년 백테스트 데이터는 자주 안 �
 
 # 백테스트 진행률
 bt_progress = {"total": 0, "done": 0, "success": 0, "failed": 0, "running": False}
+_bt_lock = asyncio.Lock()
 
 
 def clear_backtest_cache():
@@ -608,36 +609,52 @@ async def run_backtest(hold_days: int = 20, limit: int = 10) -> list[dict]:
         _cache[hold_days] = disk
         return disk["results"][:limit]
 
-    pool = DEFAULT_TICKERS
-    loop = asyncio.get_running_loop()
+    # 이미 백테스트 진행 중이면 완료 대기
+    if bt_progress["running"]:
+        for _ in range(600):
+            await asyncio.sleep(0.5)
+            if not bt_progress["running"]:
+                break
+        cached = _cache.get(hold_days)
+        if cached and (time.time() - cached["timestamp"]) < CACHE_TTL:
+            return cached["results"][:limit]
 
-    bt_progress["total"] = len(pool)
-    bt_progress["done"] = 0
-    bt_progress["success"] = 0
-    bt_progress["failed"] = 0
-    bt_progress["running"] = True
+    async with _bt_lock:
+        # 락 획득 후 캐시 재확인
+        cached = _cache.get(hold_days)
+        if cached and (time.time() - cached["timestamp"]) < CACHE_TTL:
+            return cached["results"][:limit]
 
-    def _tracked_backtest(t, hd):
-        result = _backtest_ticker(t, hd)
-        bt_progress["done"] += 1
-        if result is not None:
-            bt_progress["success"] += 1
-        else:
-            bt_progress["failed"] += 1
-        return result
+        pool = DEFAULT_TICKERS
+        loop = asyncio.get_running_loop()
 
-    results = []
-    BATCH_SIZE = 50
-    try:
-        for i in range(0, len(pool), BATCH_SIZE):
-            batch = pool[i:i + BATCH_SIZE]
-            futures = [loop.run_in_executor(_executor, _tracked_backtest, t, hold_days) for t in batch]
-            raw = await asyncio.gather(*futures)
-            results.extend([r for r in raw if r is not None])
-            if i + BATCH_SIZE < len(pool):
-                await asyncio.sleep(1)
-    finally:
-        bt_progress["running"] = False
+        bt_progress["total"] = len(pool)
+        bt_progress["done"] = 0
+        bt_progress["success"] = 0
+        bt_progress["failed"] = 0
+        bt_progress["running"] = True
+
+        def _tracked_backtest(t, hd):
+            result = _backtest_ticker(t, hd)
+            bt_progress["done"] += 1
+            if result is not None:
+                bt_progress["success"] += 1
+            else:
+                bt_progress["failed"] += 1
+            return result
+
+        results = []
+        BATCH_SIZE = 50
+        try:
+            for i in range(0, len(pool), BATCH_SIZE):
+                batch = pool[i:i + BATCH_SIZE]
+                futures = [loop.run_in_executor(_executor, _tracked_backtest, t, hold_days) for t in batch]
+                raw = await asyncio.gather(*futures)
+                results.extend([r for r in raw if r is not None])
+                if i + BATCH_SIZE < len(pool):
+                    await asyncio.sleep(1)
+        finally:
+            bt_progress["running"] = False
 
     results.sort(key=lambda x: -x["accuracy"])
 

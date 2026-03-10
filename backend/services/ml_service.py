@@ -42,6 +42,9 @@ _model_info = None
 _calibration = None
 _market_regime_cache: dict[str, dict] = {}  # date_str → regime features
 
+# ML 학습 진행률
+ml_progress = {"total": 0, "done": 0, "phase": "", "running": False}
+
 
 # ============================================================
 # 시장 레짐 (Market Regime)
@@ -462,9 +465,19 @@ def train_model(hold_days: int = 20) -> dict:
     logger.info(f"ML v6 학습 시작 (hold_days={hold_days})")
     start_time = time.time()
 
-    # === 0. 시장 레짐 데이터 로드 ===
-    _build_market_regime_lookup()
-    logger.info(f"시장 레짐 로드 완료 ({len(_market_regime_cache)}일)")
+    ml_progress["total"] = len(DEFAULT_TICKERS)
+    ml_progress["done"] = 0
+    ml_progress["phase"] = "시장 레짐 로드"
+    ml_progress["running"] = True
+
+    try:
+        # === 0. 시장 레짐 데이터 로드 ===
+        _build_market_regime_lookup()
+        logger.info(f"시장 레짐 로드 완료 ({len(_market_regime_cache)}일)")
+        ml_progress["phase"] = "데이터 수집"
+    except Exception:
+        ml_progress["running"] = False
+        raise
 
     # === 1. 데이터 수집 ===
     ticker_signals: dict[str, list] = {}
@@ -514,7 +527,9 @@ def train_model(hold_days: int = 20) -> dict:
 
             if sigs:
                 ticker_signals[ticker] = sigs
+            ml_progress["done"] += 1
         except Exception:
+            ml_progress["done"] += 1
             continue
 
     # 워크포워드 종목 성과
@@ -550,7 +565,10 @@ def train_model(hold_days: int = 20) -> dict:
             past_t.append(target)
             past_r.append(ret)
 
+    ml_progress["phase"] = "모델 학습"
+
     if len(all_rows) < 200:
+        ml_progress["running"] = False
         return {"error": f"데이터 부족: {len(all_rows)}건"}
 
     df_all = pd.DataFrame(all_rows)
@@ -817,6 +835,9 @@ def train_model(hold_days: int = 20) -> dict:
     _model = lgb_model
     _model_info = info
     _calibration = calibration
+
+    ml_progress["running"] = False
+    ml_progress["phase"] = "완료"
 
     logger.info(f"v6 완료: AUC={auc:.4f}, 80%+ {len(best_80)}개, 75%+ {len(best_75)}개")
     return info
