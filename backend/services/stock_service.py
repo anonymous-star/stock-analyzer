@@ -148,44 +148,58 @@ def search_stocks(query: str) -> list[dict]:
 
 
 def get_quote(ticker: str) -> dict:
-    """Get current price and daily change for a ticker."""
-    stock = yf.Ticker(ticker)
-    info = stock.fast_info
+    """Get current price and daily change for a ticker.
+    1) 캐시된 info에서 가격/재무 폴백 → Yahoo 호출 최소화
+    2) fast_info는 캐시 미스 시에만 호출
+    """
+    import math
 
-    try:
-        current_price = info.last_price
-        previous_close = info.previous_close
+    def _sf(v):
+        try:
+            if v is None: return None
+            f = float(v)
+            return None if math.isnan(f) or math.isinf(f) else round(f, 4)
+        except (TypeError, ValueError):
+            return None
+
+    current_price = None
+    previous_close = None
+    change = 0.0
+    change_percent = 0.0
+    volume = None
+    market_cap = None
+    currency = "USD"
+    week52_high = None
+    week52_low = None
+    name = ticker
+    financials = {}
+
+    # 1. 캐시된 info 먼저 확인 (Yahoo 호출 없음)
+    full_info = get_cached_info(ticker)
+
+    # 2. 캐시 없으면 Yahoo에서 가져오기
+    if full_info is None:
+        try:
+            stock = yf.Ticker(ticker)
+            full_info = stock.info
+            if full_info:
+                set_cached_info(ticker, full_info)
+        except Exception:
+            full_info = {}
+
+    # 3. info에서 데이터 추출
+    if full_info:
+        name = full_info.get("shortName") or full_info.get("longName") or ticker
+        current_price = _sf(full_info.get("currentPrice")) or _sf(full_info.get("regularMarketPrice"))
+        previous_close = _sf(full_info.get("previousClose")) or _sf(full_info.get("regularMarketPreviousClose"))
         if current_price and previous_close and previous_close != 0:
             change = current_price - previous_close
             change_percent = (change / previous_close) * 100
-        else:
-            change = 0.0
-            change_percent = 0.0
-    except Exception:
-        current_price = None
-        change = 0.0
-        change_percent = 0.0
-
-    # Get company name + financial data from full info (캐시 우선)
-    name = ticker
-    financials = {}
-    try:
-        full_info = get_cached_info(ticker)
-        if full_info is None:
-            full_info = stock.info
-            set_cached_info(ticker, full_info)
-
-        name = full_info.get("shortName") or full_info.get("longName") or ticker
-        # 재무 데이터 추출 (추가 API 호출 없음)
-        import math
-
-        def _sf(v):
-            try:
-                if v is None: return None
-                f = float(v)
-                return None if math.isnan(f) or math.isinf(f) else round(f, 4)
-            except (TypeError, ValueError):
-                return None
+        volume = full_info.get("averageVolume") or full_info.get("volume")
+        market_cap = full_info.get("marketCap")
+        currency = full_info.get("currency", "USD")
+        week52_high = _sf(full_info.get("fiftyTwoWeekHigh"))
+        week52_low = _sf(full_info.get("fiftyTwoWeekLow"))
 
         financials = {
             "pe_ratio": _sf(full_info.get("trailingPE")),
@@ -197,21 +211,19 @@ def get_quote(ticker: str) -> dict:
             "earnings_growth": _sf(full_info.get("earningsGrowth")),
             "profit_margin": _sf(full_info.get("profitMargins")),
         }
-    except Exception:
-        pass
 
     return {
         "ticker": ticker,
         "name": name,
         "current_price": current_price,
-        "previous_close": getattr(info, "previous_close", None),
+        "previous_close": previous_close,
         "change": round(change, 4) if change else 0,
         "change_percent": round(change_percent, 2) if change_percent else 0,
-        "volume": getattr(info, "three_month_average_volume", None),
-        "market_cap": getattr(info, "market_cap", None),
-        "currency": getattr(info, "currency", "USD"),
-        "52_week_high": getattr(info, "year_high", None),
-        "52_week_low": getattr(info, "year_low", None),
+        "volume": volume,
+        "market_cap": market_cap,
+        "currency": currency,
+        "52_week_high": week52_high,
+        "52_week_low": week52_low,
         "financials": financials,
     }
 

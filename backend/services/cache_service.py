@@ -11,10 +11,10 @@ _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 _DB_PATH = os.path.join(_DB_DIR, "cache.db")
 
 # TTL (초)
-TTL_HISTORY_SHORT = 4 * 3600    # 가격 히스토리 1d interval: 4시간
-TTL_HISTORY_LONG = 72 * 3600    # 가격 히스토리 10y, 1y 등: 72시간 (3일)
-TTL_INFO = 24 * 3600            # 회사 정보 (stock.info): 24시간
-TTL_FINANCIALS = 72 * 3600      # 재무 데이터 (stock.financials): 72시간 (3일)
+TTL_HISTORY_SHORT = 12 * 3600    # 가격 히스토리 1d interval: 12시간
+TTL_HISTORY_LONG = 7 * 24 * 3600  # 가격 히스토리 10y, 1y 등: 7일
+TTL_INFO = 7 * 24 * 3600         # 회사 정보 (stock.info): 7일
+TTL_FINANCIALS = 7 * 24 * 3600   # 재무 데이터 (stock.financials): 7일
 
 _local = threading.local()
 
@@ -46,6 +46,11 @@ def _init_tables(conn: sqlite3.Connection):
         );
         CREATE TABLE IF NOT EXISTS financial_data (
             ticker TEXT PRIMARY KEY,
+            data BLOB NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS result_cache (
+            key TEXT PRIMARY KEY,
             data BLOB NOT NULL,
             updated_at REAL NOT NULL
         );
@@ -147,6 +152,36 @@ def set_cached_financials(ticker: str, data: dict):
     conn.commit()
 
 
+# ── 결과 캐시 (추천/백테스트 결과 디스크 저장) ──
+
+def get_cached_result(key: str, ttl: int) -> object | None:
+    """키 기반 결과 캐시 조회. 만료 시 None."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT data, updated_at FROM result_cache WHERE key=?", (key,)
+    ).fetchone()
+    if row is None:
+        return None
+    data_blob, updated_at = row
+    if time.time() - updated_at > ttl:
+        return None
+    try:
+        return pickle.loads(data_blob)
+    except Exception:
+        return None
+
+
+def set_cached_result(key: str, data: object):
+    """결과를 디스크 캐시에 저장."""
+    conn = _get_conn()
+    blob = pickle.dumps(data)
+    conn.execute(
+        "INSERT OR REPLACE INTO result_cache (key, data, updated_at) VALUES (?,?,?)",
+        (key, blob, time.time()),
+    )
+    conn.commit()
+
+
 # ── 캐시 관리 ──
 
 def clear_all_cache():
@@ -156,6 +191,7 @@ def clear_all_cache():
         DELETE FROM price_history;
         DELETE FROM company_info;
         DELETE FROM financial_data;
+        DELETE FROM result_cache;
     """)
     conn.commit()
 

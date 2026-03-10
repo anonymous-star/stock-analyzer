@@ -9,19 +9,22 @@ import numpy as np
 import math
 
 from services.recommendation_service import DEFAULT_TICKERS
-from services.cache_service import get_cached_history, set_cached_history
+from services.cache_service import get_cached_history, set_cached_history, get_cached_result, set_cached_result
 from services.ml_service import predict_confidence as ml_predict
 
 # hold_days별 캐시: {hold_days: {"results": [...], "timestamp": float}}
 _cache: dict[int, dict] = {}
-CACHE_TTL = 14400  # 4시간
+CACHE_TTL = 24 * 3600  # 24시간 (10년 백테스트 데이터는 자주 안 바뀜)
+
+# 백테스트 진행률
+bt_progress = {"total": 0, "done": 0, "success": 0, "failed": 0, "running": False}
 
 
 def clear_backtest_cache():
     """추천 알고리즘 변경 시 캐시 초기화."""
     _cache.clear()
 
-_executor = ThreadPoolExecutor(max_workers=8)
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 def _safe_float(val) -> float | None:
@@ -598,15 +601,47 @@ async def run_backtest(hold_days: int = 20, limit: int = 10) -> list[dict]:
     if cached and (time.time() - cached["timestamp"]) < CACHE_TTL:
         return cached["results"][:limit]
 
+    # 메모리 캐시 없으면 디스크 캐시 확인
+    disk_key = f"backtest:{hold_days}"
+    disk = get_cached_result(disk_key, CACHE_TTL)
+    if disk is not None:
+        _cache[hold_days] = disk
+        return disk["results"][:limit]
+
     pool = DEFAULT_TICKERS
     loop = asyncio.get_running_loop()
 
-    futures = [loop.run_in_executor(_executor, _backtest_ticker, t, hold_days) for t in pool]
-    raw = await asyncio.gather(*futures)
+    bt_progress["total"] = len(pool)
+    bt_progress["done"] = 0
+    bt_progress["success"] = 0
+    bt_progress["failed"] = 0
+    bt_progress["running"] = True
 
-    results = [r for r in raw if r is not None]
+    def _tracked_backtest(t, hd):
+        result = _backtest_ticker(t, hd)
+        bt_progress["done"] += 1
+        if result is not None:
+            bt_progress["success"] += 1
+        else:
+            bt_progress["failed"] += 1
+        return result
+
+    results = []
+    BATCH_SIZE = 50
+    try:
+        for i in range(0, len(pool), BATCH_SIZE):
+            batch = pool[i:i + BATCH_SIZE]
+            futures = [loop.run_in_executor(_executor, _tracked_backtest, t, hold_days) for t in batch]
+            raw = await asyncio.gather(*futures)
+            results.extend([r for r in raw if r is not None])
+            if i + BATCH_SIZE < len(pool):
+                await asyncio.sleep(1)
+    finally:
+        bt_progress["running"] = False
+
     results.sort(key=lambda x: -x["accuracy"])
 
     _cache[hold_days] = {"results": results, "timestamp": time.time()}
+    set_cached_result(f"backtest:{hold_days}", _cache[hold_days])
 
     return results[:limit]

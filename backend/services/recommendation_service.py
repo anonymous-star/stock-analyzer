@@ -6,10 +6,12 @@ from services.stock_service import get_quote
 from services.technical_service import get_technical_indicators
 from services.sentiment_service import score_headlines
 from services.ml_service import predict_confidence as ml_predict
+from services.cache_service import get_cached_result, set_cached_result
 
 # 캐시: {"data": [...], "timestamp": float}
 _cache = {"data": None, "timestamp": 0}
-CACHE_TTL = 14400  # 4시간
+CACHE_TTL = 8 * 3600  # 8시간
+_DISK_CACHE_KEY = "recommendations"
 
 # 분석 진행률 추적
 _progress = {"total": 0, "done": 0, "success": 0, "failed": 0, "running": False, "failed_tickers": []}
@@ -136,7 +138,7 @@ DEFAULT_TICKERS = [
     "GE", "GM", "F", "BA", "SBUX", "NKE", "TGT", "COP",
 ]
 
-_executor = ThreadPoolExecutor(max_workers=10)
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 # ── 점수 체계 ──
@@ -732,6 +734,14 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     if use_cache and _cache["data"] is not None and (time.time() - _cache["timestamp"]) < CACHE_TTL:
         return _cache["data"][:limit]
 
+    # 메모리 캐시 없으면 디스크 캐시 확인
+    if use_cache and _cache["data"] is None:
+        disk = get_cached_result(_DISK_CACHE_KEY, CACHE_TTL)
+        if disk is not None:
+            _cache["data"] = disk["data"]
+            _cache["timestamp"] = disk["timestamp"]
+            return _cache["data"][:limit]
+
     # 이미 분석 진행 중이면 완료될 때까지 대기
     if use_cache and _progress["running"]:
         for _ in range(600):  # 최대 5분 대기
@@ -767,8 +777,8 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
                 _progress["failed"] += 1
             return (t, result)
 
-        # 배치 처리: Yahoo Finance rate limit 방지 (50개씩, 배치 간 1초 대기)
-        BATCH_SIZE = 50
+        # 배치 처리: Yahoo Finance rate limit 방지 (20개씩, 배치 간 3초 대기)
+        BATCH_SIZE = 20
         results = []
         failed_tickers = []
         try:
@@ -782,7 +792,7 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
                     else:
                         failed_tickers.append(ticker)
                 if i + BATCH_SIZE < len(pool):
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(3)
         finally:
             _progress["running"] = False
             _progress["failed_tickers"] = failed_tickers
@@ -793,6 +803,7 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     if use_cache and results:
         _cache["data"] = results
         _cache["timestamp"] = time.time()
+        set_cached_result(_DISK_CACHE_KEY, {"data": results, "timestamp": _cache["timestamp"]})
 
     return results[:limit]
 

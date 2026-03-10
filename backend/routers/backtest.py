@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Query
-from services.backtest_service import run_backtest, clear_backtest_cache
+from services.backtest_service import run_backtest, clear_backtest_cache, bt_progress
 from services.recommendation_service import _cache as rec_cache
 from services.cache_service import clear_all_cache as clear_disk_cache, get_cache_stats
-from services.ml_service import train_model, get_model_info, reload_model
+from services.ml_service import train_model, get_model_info, reload_model, ml_progress
 
 router = APIRouter()
 
@@ -109,6 +109,18 @@ async def model_train(
         rec_cache["data"] = None
         rec_cache["timestamp"] = 0
     return result
+
+
+@router.get("/backtest/progress")
+async def backtest_progress():
+    """백테스트 진행률."""
+    return bt_progress
+
+
+@router.get("/model/progress")
+async def model_progress():
+    """ML 학습 진행률."""
+    return ml_progress
 
 
 @router.get("/model/info")
