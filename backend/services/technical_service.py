@@ -24,9 +24,19 @@ def get_technical_indicators(ticker: str) -> dict:
     # 캐시 우선
     df = get_cached_history(ticker, "1y", "1d")
     if df is None:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="1y", interval="1d")
-        if not df.empty:
+        try:
+            stock = yf.Ticker(ticker)
+            df = stock.history(period="1y", interval="1d")
+        except Exception:
+            df = None
+        # yfinance 실패 시 curl_cffi 폴백
+        if df is None or df.empty:
+            try:
+                from services.stock_service import _fetch_history_cffi
+                df = _fetch_history_cffi(ticker, "1y", "1d")
+            except Exception:
+                df = None
+        if df is not None and not df.empty:
             set_cached_history(ticker, "1y", "1d", df)
 
     if df is None or df.empty or len(df) < 20:

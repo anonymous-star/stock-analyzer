@@ -12,6 +12,29 @@ from services.recommendation_service import DEFAULT_TICKERS
 from services.cache_service import get_cached_history, set_cached_history, get_cached_result, set_cached_result
 from services.ml_service import predict_confidence as ml_predict
 
+
+def _fetch_history_cffi(ticker: str, period: str = "10y", interval: str = "1d") -> pd.DataFrame | None:
+    """curl_cffi 기반 Yahoo Finance 직접 호출 (yfinance rate limit 우회)."""
+    try:
+        from curl_cffi import requests as cffi_requests
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        params = {"range": period, "interval": interval, "includePrePost": "false"}
+        r = cffi_requests.get(url, params=params, impersonate="chrome", timeout=30)
+        data = r.json()
+        result = data["chart"]["result"][0]
+        ts = result["timestamp"]
+        quotes = result["indicators"]["quote"][0]
+        df = pd.DataFrame({
+            "Open": quotes["open"],
+            "High": quotes["high"],
+            "Low": quotes["low"],
+            "Close": quotes["close"],
+            "Volume": quotes["volume"],
+        }, index=pd.to_datetime(ts, unit="s"))
+        return df.dropna()
+    except Exception:
+        return None
+
 # hold_days별 캐시: {hold_days: {"results": [...], "timestamp": float}}
 _cache: dict[int, dict] = {}
 CACHE_TTL = 24 * 3600  # 24시간 (10년 백테스트 데이터는 자주 안 바뀜)
@@ -85,7 +108,9 @@ def _precompute_indicators(close: pd.Series, volume: pd.Series) -> dict:
 
 
 def _score_at(ind: dict, i: int) -> dict | None:
-    """사전 계산된 지표에서 i번째 시점의 점수 계산."""
+    """사전 계산된 지표에서 i번째 시점의 점수 계산.
+    recommendation_service._score_technical/financial/volume/momentum/recency와 동일 로직.
+    """
     if i < 200 or i >= ind["n"]:
         return None
 
@@ -122,78 +147,36 @@ def _score_at(ind: dict, i: int) -> dict | None:
     yh = ind["year_high"][i]
     yl = ind["year_low"][i]
 
-    # === 점수 계산 ===
-    score = 0
+    # === 추세 방향 사전 계산 (recommendation_service와 동일) ===
+    trend_up = not math.isnan(ma20) and not math.isnan(ma50) and price > ma20 > ma50
+    trend_down = not math.isnan(ma20) and not math.isnan(ma50) and price < ma20 < ma50
 
-    # MA 추세 (+2/-2)
-    if price > ma20 > ma50:
-        score += 2
-    elif price < ma20 < ma50:
-        score -= 2
+    # RSI 5일 변화 (여러 곳에서 사용하므로 먼저 계산)
+    _rsi_change_raw = None
+    if i >= 5:
+        _g2 = ind["rsi_gain"][i - 5]
+        _l2 = ind["rsi_loss"][i - 5]
+        _rs2 = _g2 / _l2 if _l2 != 0 else 100
+        _rsi_prev = 100 - (100 / (1 + _rs2))
+        _rsi_change_raw = rsi - _rsi_prev
 
-    # MA200 (+1/-1)
-    if price > ma200:
-        score += 1
-    else:
-        score -= 1
+    rsi_recovering = _rsi_change_raw is not None and _rsi_change_raw > 0
 
-    # 데드크로스 (MA50 < MA200) — 장기 하락추세 감점
-    if not math.isnan(ma50) and not math.isnan(ma200) and ma50 < ma200:
-        score -= 1
+    # MA20 기울기 (여러 곳에서 사용)
+    _ma20_slope_raw = None
+    if i >= 5:
+        _ma20_prev = ind["ma20"][i - 5]
+        if _ma20_prev > 0 and not math.isnan(_ma20_prev):
+            _ma20_slope_raw = (ma20 - _ma20_prev) / _ma20_prev * 100
 
-    # RSI (+2/-1)
-    if rsi < 30:
-        score += 2
-    elif rsi > 70:
-        score -= 1
+    slope_up = _ma20_slope_raw is not None and _ma20_slope_raw > 0
 
-    # MACD (+1/-1)
-    if macd_l > sig_l:
-        score += 1
-    else:
-        score -= 1
+    # MACD 가속도 (여러 곳에서 사용)
+    _macd_accel_raw = None
+    if i >= 1:
+        _macd_accel_raw = ind["macd_hist"][i] - ind["macd_hist"][i - 1]
 
-    # BB (+2/-1)
-    if price < bb_lower:
-        score += 2
-    elif price > bb_upper:
-        score -= 1
-
-    # 52주 고저
-    pct_from_low = 999
-    if yh > 0 and not math.isnan(yh):
-        pct_from_high = (price - yh) / yh
-        pct_from_low = (price - yl) / yl if yl > 0 else 0
-        if pct_from_high >= -0.05:
-            score -= 1
-        elif pct_from_low <= 0.10:
-            score += 2
-        elif pct_from_low <= 0.30:
-            score += 1
-
-    near_low = pct_from_low < 0.30
-
-    # 거래량 (-2~+2) — 10년 분석: 급증 시 과열로 적중률 하락, 축소
-    prev_price = ind["c"][i - 1] if i > 0 else price
-    day_change = (price - prev_price) / prev_price * 100 if prev_price > 0 else 0
-    if vol_ratio > 2.0:
-        if day_change > 0:
-            score += 1  # 거래량 급증+상승: 과열 가능, 축소 (3→1)
-        elif day_change < -2:
-            score -= 2
-        else:
-            score += 0
-    elif vol_ratio > 1.5:
-        if day_change > 0:
-            score += 1  # (2→1)
-        elif day_change < -2:
-            score -= 1
-    elif vol_ratio < 0.5:
-        score -= 1
-    if day_change > 1 and vol_ratio > 1.3:
-        score += 1
-
-    # 모멘텀/반등 보호 — 10년 분석: 조정 후 반등이 가장 효과적
+    # 모멘텀 관련 사전 계산
     c = ind["c"]
     mom5 = (price - c[i - 5]) / c[i - 5] * 100 if i >= 5 and c[i - 5] > 0 else 0
     mom10 = (price - c[i - 10]) / c[i - 10] * 100 if i >= 10 and c[i - 10] > 0 else 0
@@ -204,110 +187,131 @@ def _score_at(ind: dict, i: int) -> dict | None:
         else:
             break
 
-    if mom5 < -5 and near_low:
-        score += 1
-    if mom10 < -10 and near_low:
-        score += 1
-    if down_streak >= 3 and near_low:
-        score += 1
-
-    # 10년 교정 보너스: 조정 후 반등 (적중률 66%)
     trend_20d_raw = None
     if i >= 20 and c[i - 20] > 0:
         trend_20d_raw = (price - c[i - 20]) / c[i - 20] * 100
     volatility_raw = ind["std20"][i] / price * 100 if price > 0 and not math.isnan(ind["std20"][i]) else None
 
-    if trend_20d_raw is not None and trend_20d_raw < 0 and volatility_raw is not None and volatility_raw <= 4:
-        score += 2  # 조정 후 반등 + 저변동성: 적중률 66%
+    # === 기술적 점수 (recommendation_service._score_technical과 동일) ===
+    tech_score = 0
 
-    # 변동성 직접 페널티 (고변동성 = 예측 어려움)
-    if volatility_raw is not None:
-        if volatility_raw > 5:
-            score -= 2  # 매우 높은 변동성
-        elif volatility_raw > 4:
-            score -= 1  # 높은 변동성
+    # MA 추세 (+3/-3) — 가장 중요한 지표
+    if trend_up:
+        tech_score += 3
+    elif trend_down:
+        tech_score -= 3
 
-    # 과열 감점: 고변동성 + 거래량 급증은 위험
-    if volatility_raw is not None and volatility_raw > 4 and vol_ratio > 1.5:
-        score -= 1
+    # MA200 (+1/-2) — 하락 시 더 큰 감점
+    if not math.isnan(ma200):
+        if price > ma200:
+            tech_score += 1
+        else:
+            tech_score -= 2
 
-    # === 최근 트렌드 가중 (-3~+4) ===
-    # RSI 5일 변화
-    _rsi_change_raw = None
-    if i >= 5:
-        _g2 = ind["rsi_gain"][i - 5]
-        _l2 = ind["rsi_loss"][i - 5]
-        _rs2 = _g2 / _l2 if _l2 != 0 else 100
-        _rsi_prev = 100 - (100 / (1 + _rs2))
-        _rsi_change_raw = rsi - _rsi_prev
+    # 데드크로스
+    if not math.isnan(ma50) and not math.isnan(ma200) and ma50 < ma200:
+        tech_score -= 1
+
+    # RSI — 추세 전환 확인 시에만 보너스
+    if rsi < 30:
+        if rsi_recovering and slope_up:
+            tech_score += 2  # 과매도 + 반등 확인
+        else:
+            tech_score -= 1  # 떨어지는 칼날
+    elif rsi > 70:
+        tech_score -= 1
+
+    # MACD — 추세 방향과 일치할 때만
+    if macd_l > sig_l:
+        if not trend_down:
+            tech_score += 1
+    else:
+        tech_score -= 1
+
+    # 볼린저밴드 — 추세 전환 확인 시에만
+    if price < bb_lower:
+        if rsi_recovering:
+            tech_score += 1
+        else:
+            tech_score -= 1
+    elif price > bb_upper:
+        tech_score -= 1
+
+    # 52주 고저 — 보수적 접근
+    pct_from_low = 999
+    if yh > 0 and not math.isnan(yh):
+        pct_from_high = (price - yh) / yh
+        pct_from_low = (price - yl) / yl if yl > 0 else 0
+        if pct_from_high >= -0.05:
+            tech_score -= 1
+        elif pct_from_low <= 0.10 and rsi_recovering and slope_up:
+            tech_score += 1  # 52주 저가 + 반등 확인
+
+    near_low = pct_from_low < 0.30
+
+    # === 거래량 점수 (recommendation_service._score_volume과 동일) ===
+    vol_score = 0
+    prev_price = ind["c"][i - 1] if i > 0 else price
+    day_change = (price - prev_price) / prev_price * 100 if prev_price > 0 else 0
+    if vol_ratio > 2.0:
+        if day_change > 0:
+            vol_score += 1
+        elif day_change < -2:
+            vol_score -= 2
+    elif vol_ratio > 1.5:
+        if day_change > 0:
+            vol_score += 1
+        elif day_change < -2:
+            vol_score -= 1
+    elif vol_ratio < 0.5:
+        vol_score -= 1
+    if day_change > 1 and vol_ratio > 1.3:
+        vol_score += 1
+    vol_score = max(-3, min(3, vol_score))
+
+    # === 모멘텀 점수 (recommendation_service._score_momentum과 동일) ===
+    mom_score = 0
+    rsi_recovering_strong = _rsi_change_raw is not None and _rsi_change_raw > 3
+
+    if mom5 < -5 and near_low and rsi_recovering_strong:
+        mom_score += 1
+    if mom10 < -10 and near_low and rsi_recovering_strong:
+        mom_score += 1
+    if down_streak >= 5:
+        mom_score -= 1  # 연속 하락은 감점
+    mom_score = max(0, min(3, mom_score))
+
+    # === 최근 트렌드 점수 (recommendation_service._score_recency와 동일) ===
+    rec_score = 0
 
     if _rsi_change_raw is not None:
         if 3 <= _rsi_change_raw <= 15:
-            score += 1
+            rec_score += 1
         elif _rsi_change_raw < -10:
-            score -= 1
-
-    # MA20 기울기
-    _ma20_slope_raw = None
-    if i >= 5:
-        _ma20_prev = ind["ma20"][i - 5]
-        if _ma20_prev > 0 and not math.isnan(_ma20_prev):
-            _ma20_slope_raw = (ma20 - _ma20_prev) / _ma20_prev * 100
+            rec_score -= 1
 
     if _ma20_slope_raw is not None:
         if _ma20_slope_raw > 0.5:
-            score += 1
+            rec_score += 1
         elif _ma20_slope_raw < -0.5:
-            score -= 1
-
-    # MACD 가속도
-    _macd_accel_raw = None
-    if i >= 1:
-        _macd_accel_raw = ind["macd_hist"][i] - ind["macd_hist"][i - 1]
+            rec_score -= 1
 
     if _macd_accel_raw is not None:
         if _macd_accel_raw > 0.1:
-            score += 1
+            rec_score += 1
         elif _macd_accel_raw < -0.3:
-            score -= 1
+            rec_score -= 1
 
-    # 20일 하락 중 5일 반등 → 추세 전환
-    if trend_20d_raw is not None and trend_20d_raw < -3 and mom5 > 1:
-        score += 1
+    # 20일 하락 + 5일 반등 (엄격한 조건)
+    if trend_20d_raw is not None and mom5 is not None:
+        if trend_20d_raw < -3 and mom5 > 2 and slope_up:
+            rec_score += 1
+        elif trend_20d_raw < -5 and mom5 < -1:
+            rec_score -= 1
+    rec_score = max(-3, min(4, rec_score))
 
-    # === 연구 기반 신규 신호 (v6.1) ===
-
-    # RSI 다이버전스: 가격 20일 하락인데 RSI 상승 → 반전 임박 (+1, 적중 60.9%)
-    rsi_divergence = 0
-    if i >= 20:
-        _g20 = ind["rsi_gain"][i - 20]
-        _l20 = ind["rsi_loss"][i - 20]
-        _rs20 = _g20 / _l20 if _l20 != 0 else 100
-        _rsi_20ago = 100 - (100 / (1 + _rs20))
-        if trend_20d_raw is not None and trend_20d_raw < 0 and rsi > _rsi_20ago:
-            rsi_divergence = 1
-            score += 1
-
-    # 골든크로스 근접: MA20이 MA50 부근 (±2%) → 추세 전환 가능 (+1, 수익 +1.07%)
-    golden_near = 0
-    if not math.isnan(ma20) and not math.isnan(ma50) and ma50 > 0:
-        ma_gap = (ma20 - ma50) / ma50 * 100
-        if -1 <= ma_gap <= 2:
-            golden_near = 1
-            score += 1
-
-    # 매도 고갈: 하락 중 거래량 50% 이하 감소 → 매도 압력 소진 (+1, 수익 +1.46%)
-    vol_dry = 0
-    if i >= 9 and trend_20d_raw is not None and trend_20d_raw < 0:
-        recent_vol = float(np.mean(ind["v"][i - 4:i + 1]))
-        prev_vol = float(np.mean(ind["v"][i - 9:i - 4]))
-        if prev_vol > 0 and recent_vol / prev_vol < 0.7:
-            vol_dry = 1
-            score += 1
-
-    # 콤보 보너스: RSI<30 + 저변동성(<3%) + MACD↑ → 적중 77.4%, 수익 +3.77%
-    if rsi < 30 and volatility_raw is not None and volatility_raw < 3 and _macd_accel_raw is not None and _macd_accel_raw > 0:
-        score += 2  # 최강 콤보 보너스
+    # === 합산 ===
+    score = tech_score + vol_score + mom_score + rec_score
 
     # 품질 지표
     volatility = None
@@ -346,6 +350,8 @@ def _score_at(ind: dict, i: int) -> dict | None:
     return {
         "price": price,
         "score": score,
+        "tech_score": tech_score,
+        "vol_score": vol_score,
         "rsi": round(rsi, 1),
         "vol_ratio": round(vol_ratio, 2),
         "mom5": round(mom5, 2),
@@ -356,9 +362,6 @@ def _score_at(ind: dict, i: int) -> dict | None:
         "ma20_slope": ma20_slope,
         "macd_accel": macd_accel,
         "trend_20d": trend_20d,
-        "rsi_divergence": rsi_divergence,
-        "golden_near": golden_near,
-        "vol_dry": vol_dry,
     }
 
 
@@ -451,9 +454,15 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
         # 10년 데이터 캐시 우선 (가장 큰 효과)
         df = get_cached_history(ticker, "10y", "1d")
         if df is None:
-            stock = yf.Ticker(ticker)
-            df = stock.history(period="10y", interval="1d")
-            if not df.empty:
+            try:
+                stock = yf.Ticker(ticker)
+                df = stock.history(period="10y", interval="1d")
+            except Exception:
+                df = None
+            # yfinance 실패 시 curl_cffi 폴백
+            if df is None or df.empty:
+                df = _fetch_history_cffi(ticker, "10y", "1d")
+            if df is not None and not df.empty:
                 set_cached_history(ticker, "10y", "1d", df)
         if df is None or df.empty or len(df) < 220:
             return None
@@ -482,7 +491,8 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
             ret = (exit_price - entry_price) / entry_price * 100
 
             # 백테스트 임계값 (recommendation_service와 동일)
-            if score >= 5:
+            is_buy = score >= 5
+            if is_buy:
                 rec = "BUY"
                 # ML 예측 우선, 폴백 규칙
                 ml_features = {**signals}

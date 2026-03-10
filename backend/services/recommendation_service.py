@@ -10,7 +10,7 @@ from services.cache_service import get_cached_result, set_cached_result
 
 # 캐시: {"data": [...], "timestamp": float}
 _cache = {"data": None, "timestamp": 0}
-CACHE_TTL = 8 * 3600  # 8시간
+CACHE_TTL = 1 * 3600  # 1시간
 _DISK_CACHE_KEY = "recommendations"
 
 # 분석 진행률 추적
@@ -150,82 +150,101 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 def _score_technical(tech: dict, quote: dict) -> tuple[int, list[str]]:
     """
-    기술적 지표 점수화 (52주 고저 포함).
-    반환: (score -7~+7, reasons)
+    기술적 지표 점수화 (추세 확인 중심).
+    핵심 원칙: 추세 방향 확인 없이 반등을 기대하지 않음.
+    반환: (score -8~+8, reasons)
     """
     score = 0
     reasons = []
     signals = tech.get("signals", {})
     price = tech.get("current_price")
     ma200 = tech.get("ma200")
+    ma50 = tech.get("ma50")
     rsi = tech.get("rsi")
+    rsi_change = tech.get("rsi_change_5d")
+    ma20_slope = tech.get("ma20_slope")
 
-    # MA 추세 (+2/-2)
+    # 추세 방향 판단 (다른 지표의 조건으로 사용)
     ma_trend = signals.get("ma_trend")
-    if ma_trend == "bullish":
-        score += 2
+    trend_up = ma_trend == "bullish"
+    trend_down = ma_trend == "bearish"
+    rsi_recovering = rsi_change is not None and rsi_change > 0
+    slope_up = ma20_slope is not None and ma20_slope > 0
+
+    # MA 추세 (+3/-3) — 가장 중요한 지표, 가중치 상향
+    if trend_up:
+        score += 3
         reasons.append("이동평균선 정배열 (상승추세)")
-    elif ma_trend == "bearish":
-        score -= 2
+    elif trend_down:
+        score -= 3
         reasons.append("이동평균선 역배열 (하락추세)")
 
-    # 장기 MA200 (+1/-1)
+    # 장기 MA200 (+1/-2) — 하락 시 더 큰 감점
     if price and ma200:
         if price > ma200:
             score += 1
             reasons.append("MA200 상회 (장기 강세)")
         else:
-            score -= 1
+            score -= 2
+            reasons.append("MA200 하회 (장기 약세)")
 
     # 데드크로스 (MA50 < MA200) — 장기 하락추세 감점
-    ma50 = tech.get("ma50")
     if ma50 and ma200 and ma50 < ma200:
         score -= 1
-        reasons.append("MA50 < MA200 데드크로스 — 장기 하락추세")
+        reasons.append("MA50 < MA200 데드크로스")
 
-    # RSI (+2/-1)
+    # RSI — 추세 전환 확인 시에만 보너스
     rsi_signal = signals.get("rsi_signal")
     if rsi_signal == "oversold":
-        score += 2
-        reasons.append(f"RSI {rsi:.1f} — 과매도 반등 기대")
+        if rsi_recovering and slope_up:
+            # 과매도 + RSI 회복 + MA20 상승 = 진짜 반등
+            score += 2
+            reasons.append(f"RSI {rsi:.1f} 과매도 + 반등 확인")
+        else:
+            # 과매도지만 추세 전환 미확인 = 떨어지는 칼날
+            score -= 1
+            reasons.append(f"RSI {rsi:.1f} 과매도 — 추세 전환 미확인")
     elif rsi_signal == "overbought":
         score -= 1
-        reasons.append(f"RSI {rsi:.1f} — 과매수 주의")
+        reasons.append(f"RSI {rsi:.1f} 과매수 주의")
 
-    # MACD (+1/-1)
+    # MACD — 추세 방향과 일치할 때만 보너스
     macd_signal = signals.get("macd_signal")
     if macd_signal == "bullish":
-        score += 1
-        reasons.append("MACD 골든크로스")
+        if not trend_down:  # 하락추세 아닐 때만
+            score += 1
+            reasons.append("MACD 골든크로스")
     elif macd_signal == "bearish":
         score -= 1
         reasons.append("MACD 데드크로스")
 
-    # 볼린저밴드 (+2/-1)
+    # 볼린저밴드 — 추세 전환 확인 시에만 보너스
     bb_pos = signals.get("bb_position")
     if bb_pos == "below_lower":
-        score += 2
-        reasons.append("볼린저밴드 하단 — 단기 반등 가능")
+        if rsi_recovering:
+            score += 1
+            reasons.append("볼린저밴드 하단 + 반등 시작")
+        else:
+            score -= 1
+            reasons.append("볼린저밴드 하단 이탈 — 추가 하락 위험")
     elif bb_pos == "above_upper":
         score -= 1
-        reasons.append("볼린저밴드 상단 돌파 — 과열 주의")
+        reasons.append("볼린저밴드 상단 — 과열 주의")
 
-    # 52주 고가/저가 근접도 (강화된 반등 보호)
+    # 52주 고가/저가 — 보수적 접근
     week52_high = quote.get("52_week_high")
     week52_low = quote.get("52_week_low")
     if price and week52_high and week52_low and week52_high > 0:
         pct_from_high = (price - week52_high) / week52_high
         pct_from_low = (price - week52_low) / week52_low if week52_low > 0 else 0
 
-        if pct_from_high >= -0.05:  # 52주 고가 5% 이내
+        if pct_from_high >= -0.05:
             score -= 1
             reasons.append("52주 고가 근접 — 상승 여력 제한")
-        elif pct_from_low <= 0.10:  # 52주 저가 10% 이내
-            score += 2
-            reasons.append("52주 저가 근접 — 반등 가능성 높음")
-        elif pct_from_low <= 0.30:  # 52주 저가 30% 이내
+        elif pct_from_low <= 0.10 and rsi_recovering and slope_up:
+            # 52주 저가 근처 + 반등 확인 = 보너스
             score += 1
-            reasons.append("52주 저가 근처 — 추가 하락 제한적")
+            reasons.append("52주 저가 근처 + 반등 확인")
 
     return score, reasons
 
@@ -357,20 +376,22 @@ def _score_momentum(tech: dict, quote: dict) -> tuple[int, list[str]]:
         pct_from_low = (price - week52_low) / week52_low
         near_low = pct_from_low < 0.30
 
-    # 이미 급락한 상태 (5일 모멘텀 < -5%) → 반등 가능
-    if mom5 is not None and mom5 < -5 and near_low:
-        score += 1
-        reasons.append(f"5일 {mom5:+.1f}% 급락 후 반등 가능")
+    # 급락 후 반등은 RSI 회복 확인 시에만
+    rsi_change = tech.get("rsi_change_5d")
+    rsi_recovering = rsi_change is not None and rsi_change > 3
 
-    # 깊은 하락 (10일 모멘텀 < -10%) → 강한 반등 기대
-    if mom10 is not None and mom10 < -10 and near_low:
+    if mom5 is not None and mom5 < -5 and near_low and rsi_recovering:
         score += 1
-        reasons.append(f"10일 {mom10:+.1f}% 깊은 하락 — 기술적 반등 기대")
+        reasons.append(f"5일 {mom5:+.1f}% 급락 후 RSI 회복 확인")
 
-    # 3일+ 연속 하락 → 반등 임박
-    if down_streak >= 3 and near_low:
+    if mom10 is not None and mom10 < -10 and near_low and rsi_recovering:
         score += 1
-        reasons.append(f"{down_streak}일 연속 하락 — 반등 임박")
+        reasons.append(f"10일 {mom10:+.1f}% 깊은 하락 후 반등 시작")
+
+    # 연속 하락은 오히려 감점 (추세 전환 확인 전까지)
+    if down_streak >= 5:
+        score -= 1
+        reasons.append(f"{down_streak}일 연속 하락 — 추세 하락 지속")
 
     # 클램핑: 0 ~ +3
     score = max(0, min(3, score))
@@ -419,11 +440,14 @@ def _score_recency(tech: dict, quote: dict) -> tuple[int, list[str]]:
             score -= 1
             reasons.append("MACD 감속 — 추세 약화 경고")
 
-    # 20일 추세 + 5일 모멘텀 조합: 조정 후 반등 vs 지속 하락
+    # 20일 추세 + 5일 모멘텀 조합: 조정 후 반등 (엄격한 조건)
     if trend_20d is not None and mom5 is not None:
-        if trend_20d < -3 and mom5 > 1:
-            score += 1  # 20일 하락 중 최근 5일 반등 → 추세 전환 신호
-            reasons.append(f"20일 {trend_20d:+.1f}% 조정 후 5일 반등 — 추세 전환 가능")
+        if trend_20d < -3 and mom5 > 2 and (ma20_slope is not None and ma20_slope > 0):
+            score += 1  # 20일 하락 → 5일 강한 반등 + MA20 상승 전환
+            reasons.append(f"20일 {trend_20d:+.1f}% 조정 후 반등 확인 (MA20 상승)")
+        elif trend_20d < -5 and mom5 < -1:
+            score -= 1  # 20일 급락 + 5일도 하락 = 추세 가속
+            reasons.append(f"20일 {trend_20d:+.1f}% 급락 지속")
 
     score = max(-3, min(4, score))
     return score, reasons
@@ -607,17 +631,6 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
             # 합산 (-20 ~ +28)
             total_score = tech_score + fin_score + vol_score + mom_score + rec_score + news_score
 
-            # 추천 결정
-            if total_score >= 5:
-                rec = "BUY"
-            elif total_score <= -5:
-                rec = "SELL"
-            else:
-                rec = "HOLD"
-
-            # 모든 이유 합치기 (최대 5개)
-            all_reasons = tech_reasons + fin_reasons + vol_reasons + mom_reasons + rec_reasons + news_reasons
-
             # 거래량 비율 계산
             vol_ratio = None
             current_vol = tech.get("current_volume")
@@ -634,22 +647,31 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "news": news_score,
             }
 
-            # 시장 레짐 기반 BUY 억제 (하락장 회피)
+            # === 추천 결정 ===
+            rec = "HOLD"
+            if total_score >= 5 and tech_score >= 0:
+                rec = "BUY"
+            elif total_score <= -5:
+                rec = "SELL"
+
+            # 시장 레짐 기반 BUY 억제
             try:
                 from services.ml_service import get_current_market_features
                 is_korean = ticker.endswith((".KS", ".KQ"))
                 mkt = get_current_market_features(is_korean)
                 mkt_breadth = mkt.get("market_breadth", 1.5)
                 mkt_trend = mkt.get("market_trend_20d", 0)
-                # 하락장: BUY 임계값 상향 (score 5 → 7)
-                if mkt_breadth == 0 and total_score < 7:
-                    if total_score >= 5:
-                        rec = "HOLD"  # 하락장에서 약한 BUY는 HOLD로 강등
-                # 약세장: score 5는 HOLD로
-                elif mkt_breadth <= 1 and mkt_trend < -3 and total_score == 5:
+                # 하락장: BUY 완전 차단
+                if rec == "BUY" and mkt_breadth == 0:
+                    rec = "HOLD"
+                # 약세장: score 7~8은 HOLD로
+                elif rec == "BUY" and mkt_breadth <= 1 and mkt_trend < -3 and total_score < 9:
                     rec = "HOLD"
             except Exception:
                 pass
+
+            # 모든 이유 합치기 (최대 5개)
+            all_reasons = tech_reasons + fin_reasons + vol_reasons + mom_reasons + rec_reasons + news_reasons
 
             # ML 예측 우선, 폴백 규칙
             ml_conf = None

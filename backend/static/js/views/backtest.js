@@ -240,10 +240,37 @@ const BacktestView = {
       }
 
       const avgAcc = (results.reduce((s, r) => s + r.accuracy, 0) / results.length).toFixed(1);
+      const s = res.summary || {};
       const summary = document.createElement('div');
-      summary.className = 'section-title';
-      summary.style.marginBottom = '1.5rem';
-      summary.innerHTML = `총 ${results.length}개 종목 (${holdDays}일 보유) &nbsp;<span class="badge badge-buy">평균 적중률 ${avgAcc}%</span>`;
+      summary.className = 'backtest-summary-box';
+      summary.innerHTML = `
+        <div class="section-title" style="margin-bottom:1rem">총 ${results.length}개 종목 (${holdDays}일 보유)</div>
+        <div class="backtest-stats">
+          <div class="backtest-stat">
+            <div class="backtest-stat-label">BUY 시그널</div>
+            <div class="backtest-stat-value">${s.total_signals || 0}건</div>
+          </div>
+          <div class="backtest-stat">
+            <div class="backtest-stat-label">만기 적중률</div>
+            <div class="backtest-stat-value">${s.hit_rate || 0}%</div>
+            <div class="backtest-stat-sub">${holdDays}일 후 수익 비율</div>
+          </div>
+          <div class="backtest-stat">
+            <div class="backtest-stat-label">1%+ 수익 기회</div>
+            <div class="backtest-stat-value" style="color:var(--buy)">${s.opportunity_1pct || 0}%</div>
+            <div class="backtest-stat-sub">보유 중 1%+ 도달</div>
+          </div>
+          <div class="backtest-stat">
+            <div class="backtest-stat-label">3%+ 수익 기회</div>
+            <div class="backtest-stat-value" style="color:var(--buy)">${s.opportunity_3pct || 0}%</div>
+            <div class="backtest-stat-sub">보유 중 3%+ 도달</div>
+          </div>
+          <div class="backtest-stat">
+            <div class="backtest-stat-label">손절 적용 수익</div>
+            <div class="backtest-stat-value" style="color:${(s.sl_avg_return||0) >= 0 ? 'var(--buy)' : 'var(--sell)'}">${(s.sl_avg_return||0) >= 0 ? '+' : ''}${s.sl_avg_return || 0}%</div>
+            <div class="backtest-stat-sub">동적 손절 적용 시</div>
+          </div>
+        </div>`;
       resultsDiv.appendChild(summary);
 
       results.forEach(item => resultsDiv.appendChild(this._renderCard(item)));
@@ -310,6 +337,19 @@ const BacktestView = {
         <span class="indicator-label">전체 평균 수익률</span>
         <span class="indicator-value" style="color:${avgColor}">${item.avg_return >= 0 ? '+' : ''}${item.avg_return}%</span>
       </div>
+      ${item.buy_opportunity ? `
+      <div class="indicator-row" style="padding:.5rem 0">
+        <span class="indicator-label">1%+ 수익 기회</span>
+        <span class="indicator-value" style="color:var(--buy)">${item.buy_opportunity.opportunity_1pct}%</span>
+      </div>
+      <div class="indicator-row" style="padding:.5rem 0">
+        <span class="indicator-label">3%+ 수익 기회</span>
+        <span class="indicator-value" style="color:var(--buy)">${item.buy_opportunity.opportunity_3pct}%</span>
+      </div>
+      <div class="indicator-row" style="padding:.5rem 0">
+        <span class="indicator-label">손절 적용 수익</span>
+        <span class="indicator-value" style="color:${item.buy_opportunity.sl_avg_return >= 0 ? 'var(--buy)' : 'var(--sell)'}">${item.buy_opportunity.sl_avg_return >= 0 ? '+' : ''}${item.buy_opportunity.sl_avg_return}%</span>
+      </div>` : ''}
 
       ${tiersHtml}
     `;

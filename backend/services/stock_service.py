@@ -228,14 +228,42 @@ def get_quote(ticker: str) -> dict:
     }
 
 
+def _fetch_history_cffi(ticker: str, period: str, interval: str):
+    """curl_cffi 기반 Yahoo Finance 직접 호출 (rate limit 우회)."""
+    try:
+        from curl_cffi import requests as cffi_requests
+        import pandas as pd
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        params = {"range": period, "interval": interval, "includePrePost": "false"}
+        r = cffi_requests.get(url, params=params, impersonate="chrome", timeout=30)
+        data = r.json()
+        result = data["chart"]["result"][0]
+        ts = result["timestamp"]
+        quotes = result["indicators"]["quote"][0]
+        df = pd.DataFrame({
+            "Open": quotes["open"], "High": quotes["high"],
+            "Low": quotes["low"], "Close": quotes["close"],
+            "Volume": quotes["volume"],
+        }, index=pd.to_datetime(ts, unit="s"))
+        return df.dropna()
+    except Exception:
+        return None
+
+
 def get_price_history(ticker: str, period: str = "6mo", interval: str = "1d") -> list[dict]:
     """Get historical price data."""
     # 캐시 우선
     history = get_cached_history(ticker, period, interval)
     if history is None:
-        stock = yf.Ticker(ticker)
-        history = stock.history(period=period, interval=interval)
-        if not history.empty:
+        try:
+            stock = yf.Ticker(ticker)
+            history = stock.history(period=period, interval=interval)
+        except Exception:
+            history = None
+        # yfinance 실패 시 curl_cffi 폴백
+        if history is None or history.empty:
+            history = _fetch_history_cffi(ticker, period, interval)
+        if history is not None and not history.empty:
             set_cached_history(ticker, period, interval, history)
 
     if history is None or history.empty:

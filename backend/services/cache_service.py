@@ -184,8 +184,15 @@ def set_cached_result(key: str, data: object):
 
 # ── 캐시 관리 ──
 
+def clear_results_cache():
+    """결과 캐시만 초기화 (원시 데이터 보존)."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM result_cache")
+    conn.commit()
+
+
 def clear_all_cache():
-    """전체 디스크 캐시 초기화."""
+    """전체 디스크 캐시 초기화 (원시 데이터 포함)."""
     conn = _get_conn()
     conn.executescript("""
         DELETE FROM price_history;

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 from services.backtest_service import run_backtest, clear_backtest_cache, bt_progress
 from services.recommendation_service import _cache as rec_cache
-from services.cache_service import clear_all_cache as clear_disk_cache, get_cache_stats
+from services.cache_service import clear_results_cache as clear_disk_cache, get_cache_stats
 from services.ml_service import train_model, get_model_info, reload_model, ml_progress
 
 router = APIRouter()
