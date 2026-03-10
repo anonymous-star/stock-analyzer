@@ -13,7 +13,7 @@ const App = {
 
     // 카카오 앱 키 로드
     try {
-      const cfg = await fetch('/auth/config').then(r => r.json());
+      const cfg = await API._fetch('/auth/config');
       if (cfg.kakao_js_key) Auth.KAKAO_APP_KEY = cfg.kakao_js_key;
     } catch {}
 
@@ -179,9 +179,9 @@ const App = {
       btn.textContent = 'Processing...';
 
       try {
-        const res = await fetch('/portfolio/buy', {
+        const res = await fetch(API.BASE + '/portfolio/buy', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...API._authHeaders() },
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true', ...API._authHeaders() },
           body: JSON.stringify({
             ticker, name, quantity: qty,
             tp_pct: tp, sl_pct: sl, hold_days: hold,
@@ -256,9 +256,9 @@ const App = {
       btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg> Processing...';
 
       try {
-        const res = await fetch('/portfolio/sell', {
+        const res = await fetch(API.BASE + '/portfolio/sell', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...API._authHeaders() },
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true', ...API._authHeaders() },
           body: JSON.stringify({ ticker, quantity, reason }),
         });
         const data = await res.json();

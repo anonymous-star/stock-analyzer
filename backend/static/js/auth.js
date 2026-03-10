@@ -42,9 +42,10 @@ const Auth = {
   },
 
   async login(username, password) {
-    const res = await fetch('/auth/login', {
+    const base = (typeof API !== 'undefined' && API.BASE) || '';
+    const res = await fetch(base + '/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       body: JSON.stringify({ username, password }),
     });
     const data = await res.json();
@@ -54,9 +55,10 @@ const Auth = {
   },
 
   async register(username, password, displayName) {
-    const res = await fetch('/auth/register', {
+    const base = (typeof API !== 'undefined' && API.BASE) || '';
+    const res = await fetch(base + '/auth/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       body: JSON.stringify({ username, password, display_name: displayName }),
     });
     const data = await res.json();
@@ -122,8 +124,9 @@ const Auth = {
     const token = this.getToken();
     if (!token) return false;
     try {
-      const res = await fetch('/auth/me', {
-        headers: { 'Authorization': 'Bearer ' + token },
+      const base = (typeof API !== 'undefined' && API.BASE) || '';
+      const res = await fetch(base + '/auth/me', {
+        headers: { 'Authorization': 'Bearer ' + token, 'ngrok-skip-browser-warning': 'true' },
       });
       const data = await res.json();
       if (data.error) {
