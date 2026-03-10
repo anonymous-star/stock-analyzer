@@ -73,7 +73,7 @@ const API = {
     try {
       const res = await fetch(this.BASE + url, {
         signal: controller.signal,
-        headers: this._authHeaders(),
+        headers: { ...this._authHeaders(), 'ngrok-skip-browser-warning': 'true' },
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -88,7 +88,7 @@ const API = {
   async _post(url) {
     const res = await fetch(this.BASE + url, {
       method: 'POST',
-      headers: this._authHeaders(),
+      headers: { ...this._authHeaders(), 'ngrok-skip-browser-warning': 'true' },
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));

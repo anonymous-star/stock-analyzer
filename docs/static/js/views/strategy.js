@@ -71,8 +71,7 @@ const StrategyView = {
         status.textContent = '학습 중... (1~3분 소요)';
         status.style.color = 'var(--text-secondary)';
         try {
-          const res = await fetch('/model/train', { method: 'POST' });
-          const data = await res.json();
+          const data = await API._post('/model/train');
           if (data.error) {
             status.textContent = '학습 실패: ' + data.error;
             status.style.color = 'var(--sell)';
