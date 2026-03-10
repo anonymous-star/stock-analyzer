@@ -6,7 +6,7 @@ router = APIRouter()
 
 @router.get("/recommendations")
 async def recommendations(
-    limit: int = Query(default=10, ge=1, le=100),
+    limit: int = Query(default=10, ge=1, le=300),
     tickers: str = Query(default=None, description="콤마 구분 티커 목록 (미입력시 기본 풀 사용)"),
 ):
     """

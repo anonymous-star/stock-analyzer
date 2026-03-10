@@ -10,7 +10,7 @@ router = APIRouter()
 @router.get("/backtest")
 async def backtest(
     hold_days: int = Query(default=20, ge=5, le=60, description="보유 기간 (일)"),
-    limit: int = Query(default=10, ge=1, le=100, description="결과 수"),
+    limit: int = Query(default=10, ge=1, le=300, description="결과 수"),
 ):
     """
     추천 시스템 백테스트 결과.
