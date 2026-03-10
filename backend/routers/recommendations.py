@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from services.recommendation_service import get_recommendations, DEFAULT_TICKERS, _progress, _cache
+from services.recommendation_service import get_recommendations, retry_failed, DEFAULT_TICKERS, _progress, _cache
 
 router = APIRouter()
 
@@ -18,6 +18,21 @@ async def recommendations(
     return {
         "count": len(result),
         "total_pool": len(DEFAULT_TICKERS),
+        "failed_count": len(_progress.get("failed_tickers", [])),
+        "recommendations": result,
+    }
+
+
+@router.post("/recommendations/retry")
+async def recommendations_retry(
+    limit: int = Query(default=300, ge=1, le=300),
+):
+    """실패한 종목만 재분석."""
+    result = await retry_failed(limit=limit)
+    return {
+        "count": len(result),
+        "total_pool": len(DEFAULT_TICKERS),
+        "failed_count": len(_progress.get("failed_tickers", [])),
         "recommendations": result,
     }
 
@@ -29,7 +44,10 @@ async def recommendations_progress():
     return {
         "total": _progress["total"] or len(DEFAULT_TICKERS),
         "done": _progress["done"],
+        "success": _progress.get("success", 0),
+        "failed": _progress.get("failed", 0),
         "running": _progress["running"],
         "cached": len(_cache["data"]) if _cache["data"] else 0,
         "has_cache": has_cache,
+        "failed_tickers": _progress.get("failed_tickers", []),
     }

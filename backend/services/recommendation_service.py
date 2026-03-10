@@ -12,7 +12,7 @@ _cache = {"data": None, "timestamp": 0}
 CACHE_TTL = 14400  # 4시간
 
 # 분석 진행률 추적
-_progress = {"total": 0, "done": 0, "running": False}
+_progress = {"total": 0, "done": 0, "success": 0, "failed": 0, "running": False, "failed_tickers": []}
 _analysis_lock = asyncio.Lock()
 
 # 분석 대상 종목 풀
@@ -136,7 +136,7 @@ DEFAULT_TICKERS = [
     "GE", "GM", "F", "BA", "SBUX", "NKE", "TGT", "COP",
 ]
 
-_executor = ThreadPoolExecutor(max_workers=6)
+_executor = ThreadPoolExecutor(max_workers=10)
 
 
 # ── 점수 체계 ──
@@ -753,26 +753,39 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
         # 진행률 초기화
         _progress["total"] = len(pool)
         _progress["done"] = 0
+        _progress["success"] = 0
+        _progress["failed"] = 0
         _progress["running"] = True
+        _progress["failed_tickers"] = []
 
         def _tracked_analyze(t, news):
             result = _analyze_single(t, news)
             _progress["done"] += 1
-            return result
+            if result is not None:
+                _progress["success"] += 1
+            else:
+                _progress["failed"] += 1
+            return (t, result)
 
         # 배치 처리: Yahoo Finance rate limit 방지 (50개씩, 배치 간 1초 대기)
         BATCH_SIZE = 50
         results = []
+        failed_tickers = []
         try:
             for i in range(0, len(pool), BATCH_SIZE):
                 batch = pool[i:i + BATCH_SIZE]
                 futures = [loop.run_in_executor(_executor, _tracked_analyze, t, include_news) for t in batch]
                 raw = await asyncio.gather(*futures)
-                results.extend([r for r in raw if r is not None])
+                for ticker, result in raw:
+                    if result is not None:
+                        results.append(result)
+                    else:
+                        failed_tickers.append(ticker)
                 if i + BATCH_SIZE < len(pool):
                     await asyncio.sleep(1)
         finally:
             _progress["running"] = False
+            _progress["failed_tickers"] = failed_tickers
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
@@ -782,3 +795,77 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
         _cache["timestamp"] = time.time()
 
     return results[:limit]
+
+
+async def retry_failed(limit: int = 300) -> list[dict]:
+    """
+    실패한 종목만 재분석하여 기존 캐시에 병합.
+    실패 목록이 없으면 캐시 그대로 반환.
+    """
+    failed = list(_progress.get("failed_tickers", []))
+    if not failed:
+        # 실패한 종목 없음 → 캐시 반환
+        if _cache["data"] is not None:
+            return _cache["data"][:limit]
+        return []
+
+    async with _analysis_lock:
+        # 락 획득 후 다시 확인
+        failed = list(_progress.get("failed_tickers", []))
+        if not failed:
+            if _cache["data"] is not None:
+                return _cache["data"][:limit]
+            return []
+
+        loop = asyncio.get_running_loop()
+
+        _progress["total"] = len(failed)
+        _progress["done"] = 0
+        _progress["success"] = 0
+        _progress["failed"] = 0
+        _progress["running"] = True
+        _progress["failed_tickers"] = []
+
+        def _tracked_analyze(t):
+            result = _analyze_single(t, False)
+            _progress["done"] += 1
+            if result is not None:
+                _progress["success"] += 1
+            else:
+                _progress["failed"] += 1
+            return (t, result)
+
+        new_results = []
+        still_failed = []
+        BATCH_SIZE = 50
+        try:
+            for i in range(0, len(failed), BATCH_SIZE):
+                batch = failed[i:i + BATCH_SIZE]
+                futures = [loop.run_in_executor(_executor, _tracked_analyze, t) for t in batch]
+                raw = await asyncio.gather(*futures)
+                for ticker, result in raw:
+                    if result is not None:
+                        new_results.append(result)
+                    else:
+                        still_failed.append(ticker)
+                if i + BATCH_SIZE < len(failed):
+                    await asyncio.sleep(1)
+        finally:
+            _progress["running"] = False
+            _progress["failed_tickers"] = still_failed
+
+    # 기존 캐시에 새 결과 병합
+    if _cache["data"] is not None:
+        existing_tickers = {r["ticker"] for r in _cache["data"]}
+        for r in new_results:
+            if r["ticker"] not in existing_tickers:
+                _cache["data"].append(r)
+        _cache["data"].sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
+        _cache["timestamp"] = time.time()
+        return _cache["data"][:limit]
+    elif new_results:
+        new_results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
+        _cache["data"] = new_results
+        _cache["timestamp"] = time.time()
+        return new_results[:limit]
+    return []

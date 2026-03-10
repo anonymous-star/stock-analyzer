@@ -28,7 +28,10 @@ const DashboardView = {
             text.textContent = `종목 분석 중... (${p.done}/${p.total})`;
             bar.style.display = '';
             fill.style.width = pct + '%';
-            detail.textContent = `${pct}% 완료`;
+            const parts = [];
+            if (p.success > 0) parts.push(`성공 ${p.success}`);
+            if (p.failed > 0) parts.push(`실패 ${p.failed}`);
+            detail.textContent = `${pct}% 완료` + (parts.length ? ` — ${parts.join(', ')}` : '');
           } else if (p.has_cache) {
             text.textContent = `${p.cached}개 종목 로딩 중...`;
           }
@@ -37,74 +40,100 @@ const DashboardView = {
 
       const res = await API.getRecommendations(300);
       clearInterval(progressInterval);
-      const items = res.recommendations || [];
-      const totalPool = res.total_pool || items.length;
-      container.innerHTML = '';
-
-      // Summary header with refresh button
-      const summary = document.createElement('div');
-      summary.className = 'section-title';
-      summary.style.cssText = 'margin-bottom:1.5rem;display:flex;align-items:center;flex-wrap:wrap;gap:.5rem';
-      const buyCount = items.filter(i => i.recommendation === 'BUY').length;
-      const holdCount = items.filter(i => i.recommendation === 'HOLD').length;
-      const sellCount = items.filter(i => i.recommendation === 'SELL').length;
-      const highConfCount = items.filter(i => i.recommendation === 'BUY' && i.confidence >= 80).length;
-      const failedCount = totalPool - items.length;
-      summary.innerHTML = `<span>전체 ${items.length}/${totalPool}개 종목 분석</span> `
-        + `<span class="badge badge-buy">매수 ${buyCount}</span> `
-        + (highConfCount > 0 ? `<span class="badge badge-buy" style="background:rgba(34,197,94,.2)">80%+ ${highConfCount}</span> ` : '')
-        + `<span class="badge badge-hold">보유 ${holdCount}</span> `
-        + `<span class="badge badge-sell">매도 ${sellCount}</span>`
-        + (failedCount > 0 ? ` <span class="badge" style="background:rgba(239,68,68,.15);color:var(--sell);font-size:.7rem">${failedCount}개 실패</span>` : '')
-        + ` <button id="btn-refresh-recs" class="strat-btn strat-btn--primary" style="margin-left:auto;padding:.3rem .8rem;font-size:.75rem">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-            새로고침
-          </button>`;
-      container.appendChild(summary);
-
-      // Refresh button handler
-      document.getElementById('btn-refresh-recs').addEventListener('click', async () => {
-        clearApiCache('rec');
-        DashboardView.render(container);
-      });
-
-      // Market regime warning
-      this._addMarketWarning(container);
-
-      if (items.length === 0) {
-        container.innerHTML += '<div class="empty-state">추천 데이터가 없습니다. 새로고침을 시도하세요.</div>';
-        return;
-      }
-
-      // Split into groups
-      const buyItems = items.filter(i => i.recommendation === 'BUY');
-      const holdItems = items.filter(i => i.recommendation === 'HOLD');
-      const sellItems = items.filter(i => i.recommendation === 'SELL');
-
-      // High confidence first
-      if (buyItems.length > 0) {
-        const highConf = buyItems.filter(i => i.confidence >= 80);
-        const normalConf = buyItems.filter(i => i.confidence < 80);
-
-        if (highConf.length > 0) {
-          container.appendChild(this._section('확신도 80%+ 매수 추천', 'badge-buy', highConf, true));
-        }
-        if (normalConf.length > 0) {
-          container.appendChild(this._section('매수 추천', 'badge-buy', normalConf));
-        }
-      }
-      if (holdItems.length > 0) {
-        container.appendChild(this._section('보유 / 관망', 'badge-hold', holdItems));
-      }
-      if (sellItems.length > 0) {
-        container.appendChild(this._section('매도 / 주의', 'badge-sell', sellItems));
-      }
+      this._renderResults(container, res);
     } catch (err) {
       if (progressInterval) clearInterval(progressInterval);
       container.innerHTML = `<div class="empty-state">
         데이터 로딩 실패: ${err.message}
         <br><button onclick="clearApiCache('rec'); DashboardView.render(this.closest('.main-content') || document.getElementById('main-content'))" class="strat-btn strat-btn--primary" style="margin-top:1rem">다시 시도</button>
       </div>`;
+    }
+  },
+
+  _renderResults(container, res) {
+    const items = res.recommendations || [];
+    const totalPool = res.total_pool || items.length;
+    const failedCount = res.failed_count || (totalPool - items.length);
+    container.innerHTML = '';
+
+    // Summary header
+    const summary = document.createElement('div');
+    summary.className = 'section-title';
+    summary.style.cssText = 'margin-bottom:1.5rem;display:flex;align-items:center;flex-wrap:wrap;gap:.5rem';
+    const buyCount = items.filter(i => i.recommendation === 'BUY').length;
+    const holdCount = items.filter(i => i.recommendation === 'HOLD').length;
+    const sellCount = items.filter(i => i.recommendation === 'SELL').length;
+    const highConfCount = items.filter(i => i.recommendation === 'BUY' && i.confidence >= 80).length;
+
+    summary.innerHTML = `<span>전체 ${items.length}/${totalPool}개 종목 분석</span> `
+      + `<span class="badge badge-buy">매수 ${buyCount}</span> `
+      + (highConfCount > 0 ? `<span class="badge badge-buy" style="background:rgba(34,197,94,.2)">80%+ ${highConfCount}</span> ` : '')
+      + `<span class="badge badge-hold">보유 ${holdCount}</span> `
+      + `<span class="badge badge-sell">매도 ${sellCount}</span>`
+      + (failedCount > 0
+        ? ` <span class="badge" style="background:rgba(239,68,68,.15);color:var(--sell);font-size:.7rem">${failedCount}개 실패</span>`
+        + ` <button id="btn-retry-failed" class="strat-btn" style="padding:.3rem .8rem;font-size:.75rem;background:rgba(239,68,68,.12);color:var(--sell);border:1px solid rgba(239,68,68,.25)">
+              실패 재시도
+            </button>`
+        : '')
+      + ` <button id="btn-refresh-recs" class="strat-btn strat-btn--primary" style="margin-left:auto;padding:.3rem .8rem;font-size:.75rem">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+          전체 새로고침
+        </button>`;
+    container.appendChild(summary);
+
+    // Refresh button → 전체 새로고침 (캐시 클리어)
+    document.getElementById('btn-refresh-recs').addEventListener('click', async () => {
+      clearApiCache('rec');
+      DashboardView.render(container);
+    });
+
+    // Retry button → 실패한 종목만 재시도
+    const retryBtn = document.getElementById('btn-retry-failed');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', async () => {
+        retryBtn.disabled = true;
+        retryBtn.textContent = '재시도 중...';
+        try {
+          const retryRes = await API._post('/recommendations/retry?limit=300');
+          DashboardView._renderResults(container, retryRes);
+        } catch (e) {
+          retryBtn.textContent = '재시도 실패';
+          setTimeout(() => { retryBtn.disabled = false; retryBtn.textContent = '실패 재시도'; }, 2000);
+        }
+      });
+    }
+
+    // Market regime warning
+    this._addMarketWarning(container);
+
+    if (items.length === 0) {
+      container.innerHTML += '<div class="empty-state">추천 데이터가 없습니다. 새로고침을 시도하세요.</div>';
+      return;
+    }
+
+    // Split into groups
+    const buyItems = items.filter(i => i.recommendation === 'BUY');
+    const holdItems = items.filter(i => i.recommendation === 'HOLD');
+    const sellItems = items.filter(i => i.recommendation === 'SELL');
+
+    // High confidence first
+    if (buyItems.length > 0) {
+      const highConf = buyItems.filter(i => i.confidence >= 80);
+      const normalConf = buyItems.filter(i => i.confidence < 80);
+
+      if (highConf.length > 0) {
+        container.appendChild(this._section('확신도 80%+ 매수 추천', 'badge-buy', highConf, true));
+      }
+      if (normalConf.length > 0) {
+        container.appendChild(this._section('매수 추천', 'badge-buy', normalConf));
+      }
+    }
+    if (holdItems.length > 0) {
+      container.appendChild(this._section('보유 / 관망', 'badge-hold', holdItems));
+    }
+    if (sellItems.length > 0) {
+      container.appendChild(this._section('매도 / 주의', 'badge-sell', sellItems));
     }
   },
 
