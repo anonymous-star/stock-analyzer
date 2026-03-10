@@ -518,12 +518,20 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
                     sl_pct = -7.0
 
                 sl_ret = ret  # 기본은 만기 수익
+                tp_hit = False  # TP +1% 도달 여부 (SL보다 먼저)
                 for j in range(len(window)):
                     day_ret = (float(window[j]) - entry_price) / entry_price * 100
+                    if day_ret >= 1.0:
+                        tp_hit = True
+                        break
                     if day_ret <= sl_pct:
                         sl_ret = sl_pct
                         break
-                buy_opportunities.append((max_ret, sl_ret, min_ret))
+                else:
+                    # 루프가 break 없이 끝남 → 만기 수익 기준
+                    if ret >= 1.0:
+                        tp_hit = True
+                buy_opportunities.append((max_ret, sl_ret, min_ret, tp_hit))
 
             elif score <= -5:
                 rec = "SELL"
@@ -571,11 +579,14 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
             max_rets = [o[0] for o in buy_opportunities]
             sl_rets = [o[1] for o in buy_opportunities]
             min_rets = [o[2] for o in buy_opportunities]
+            tp_hits = [o[3] for o in buy_opportunities]
             opp_1pct = sum(1 for r in max_rets if r >= 1.0)
             opp_3pct = sum(1 for r in max_rets if r >= 3.0)
             sl_wins = sum(1 for r in sl_rets if r > 0)
             sl_stopped = sum(1 for r in sl_rets if r < -2.5)
+            tp_hit_count = sum(1 for h in tp_hits if h)
             buy_opp = {
+                "tp_hit_rate": round(tp_hit_count / len(tp_hits) * 100, 1),
                 "opportunity_1pct": round(opp_1pct / len(max_rets) * 100, 1),
                 "opportunity_3pct": round(opp_3pct / len(max_rets) * 100, 1),
                 "avg_max_return": round(sum(max_rets) / len(max_rets), 2),

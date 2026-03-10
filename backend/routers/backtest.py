@@ -26,10 +26,10 @@ async def backtest(
     )
     overall_hit = round(total_buy_hits / total_buy * 100, 1) if total_buy > 0 else 0
 
-    # 수익 기회 + 동적 손절 집계
+    # 수익 기회 + 동적 손절 + TP 적중률 집계
     opp_1pct_list = []
     opp_3pct_list = []
-    sl_hits = []
+    tp_hits_list = []
     sl_returns = []
     base_returns = []
     for r in results:
@@ -38,13 +38,13 @@ async def backtest(
         if bc > 0 and opp:
             opp_1pct_list.append(opp.get("opportunity_1pct", 0) * bc / 100)
             opp_3pct_list.append(opp.get("opportunity_3pct", 0) * bc / 100)
-            sl_hits.append(opp.get("sl_hit_rate", 0) * bc / 100)
+            tp_hits_list.append(opp.get("tp_hit_rate", 0) * bc / 100)
             sl_returns.append(opp.get("sl_avg_return", 0) * bc)
             base_returns.append(r["buy"]["avg_return"] * bc)
 
     total_opp1 = sum(opp_1pct_list)
     total_opp3 = sum(opp_3pct_list)
-    total_sl_hits = sum(sl_hits)
+    total_tp_hits = sum(tp_hits_list)
     total_sl_ret = sum(sl_returns)
     total_base_ret = sum(base_returns)
 
@@ -52,6 +52,7 @@ async def backtest(
         "total_stocks": len(results),
         "total_signals": total_buy,
         "hit_rate": overall_hit,
+        "tp_hit_rate": round(total_tp_hits / total_buy * 100, 1) if total_buy > 0 else 0,
         "avg_return": round(total_base_ret / total_buy, 2) if total_buy > 0 else 0,
         "opportunity_1pct": round(total_opp1 / total_buy * 100, 1) if total_buy > 0 else 0,
         "opportunity_3pct": round(total_opp3 / total_buy * 100, 1) if total_buy > 0 else 0,

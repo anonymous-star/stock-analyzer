@@ -251,14 +251,14 @@ const BacktestView = {
             <div class="backtest-stat-value">${s.total_signals || 0}건</div>
           </div>
           <div class="backtest-stat">
+            <div class="backtest-stat-label">익절 적중률</div>
+            <div class="backtest-stat-value" style="color:var(--buy)">${s.tp_hit_rate || 0}%</div>
+            <div class="backtest-stat-sub">+1% TP 도달 (SL 전)</div>
+          </div>
+          <div class="backtest-stat">
             <div class="backtest-stat-label">만기 적중률</div>
             <div class="backtest-stat-value">${s.hit_rate || 0}%</div>
             <div class="backtest-stat-sub">${holdDays}일 후 수익 비율</div>
-          </div>
-          <div class="backtest-stat">
-            <div class="backtest-stat-label">1%+ 수익 기회</div>
-            <div class="backtest-stat-value" style="color:var(--buy)">${s.opportunity_1pct || 0}%</div>
-            <div class="backtest-stat-sub">보유 중 1%+ 도달</div>
           </div>
           <div class="backtest-stat">
             <div class="backtest-stat-label">3%+ 수익 기회</div>

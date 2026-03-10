@@ -670,6 +670,20 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
             except Exception:
                 pass
 
+            # 6b. BUY 후보에 대해 뉴스 감성 2차 검증 (기본 스캔에서도 실행)
+            if rec == "BUY" and not include_news:
+                try:
+                    from services.news_service import get_news_headlines
+                    headlines = get_news_headlines(ticker, limit=5)
+                    news_score, news_reasons = _score_news(headlines)
+                    total_score += news_score
+                    breakdown["news"] = news_score
+                    # 악재 뉴스가 심하면 BUY → HOLD 다운그레이드
+                    if news_score <= -2 or total_score < 5:
+                        rec = "HOLD"
+                except Exception:
+                    pass
+
             # 모든 이유 합치기 (최대 5개)
             all_reasons = tech_reasons + fin_reasons + vol_reasons + mom_reasons + rec_reasons + news_reasons
 
