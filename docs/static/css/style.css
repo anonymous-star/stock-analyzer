@@ -751,6 +751,11 @@ a:hover { color: var(--accent-hover); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner-text { color: var(--text-muted); font-size: .85rem; font-weight: 500; }
 
+/* Dashboard progress bar */
+.dash-loading { text-align: center; padding: 3rem 1rem; }
+.dash-progress-bar { width: 80%; max-width: 300px; height: 6px; background: var(--surface-2); border-radius: 3px; margin: 1rem auto 0; overflow: hidden; }
+.dash-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s ease; }
+
 /* === Bottom Nav (hidden by default, shown at 480px) === */
 .nav-bottom { display: none; }
 

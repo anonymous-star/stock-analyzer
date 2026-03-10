@@ -2,33 +2,78 @@
 
 const DashboardView = {
   async render(container) {
-    Utils.showSpinner(container, '종목 분석 중...');
+    // 진행률 표시 로딩 UI
+    container.innerHTML = `
+      <div class="dash-loading" id="dash-loading">
+        <div class="spinner"></div>
+        <div class="spinner-text" id="dash-loading-text">종목 분석 준비 중...</div>
+        <div class="dash-progress-bar" id="dash-progress-wrap" style="display:none">
+          <div class="dash-progress-fill" id="dash-progress-fill" style="width:0%"></div>
+        </div>
+        <div class="dash-progress-detail" id="dash-progress-detail" style="font-size:.8rem;color:var(--text-secondary);margin-top:.5rem"></div>
+      </div>`;
 
+    // 폴링으로 진행률 표시
+    let progressInterval = null;
     try {
+      progressInterval = setInterval(async () => {
+        try {
+          const p = await API._fetch('/recommendations/progress');
+          const text = document.getElementById('dash-loading-text');
+          const bar = document.getElementById('dash-progress-wrap');
+          const fill = document.getElementById('dash-progress-fill');
+          const detail = document.getElementById('dash-progress-detail');
+          if (!text) return;
+          if (p.running && p.total > 0) {
+            const pct = Math.round(p.done / p.total * 100);
+            text.textContent = `종목 분석 중... (${p.done}/${p.total})`;
+            bar.style.display = '';
+            fill.style.width = pct + '%';
+            detail.textContent = `${pct}% 완료`;
+          } else if (p.has_cache) {
+            text.textContent = `${p.cached}개 종목 로딩 중...`;
+          }
+        } catch {}
+      }, 1500);
+
       const res = await API.getRecommendations(300);
+      clearInterval(progressInterval);
       const items = res.recommendations || [];
+      const totalPool = res.total_pool || items.length;
       container.innerHTML = '';
 
-      // Summary header
+      // Summary header with refresh button
       const summary = document.createElement('div');
       summary.className = 'section-title';
-      summary.style.marginBottom = '1.5rem';
+      summary.style.cssText = 'margin-bottom:1.5rem;display:flex;align-items:center;flex-wrap:wrap;gap:.5rem';
       const buyCount = items.filter(i => i.recommendation === 'BUY').length;
       const holdCount = items.filter(i => i.recommendation === 'HOLD').length;
       const sellCount = items.filter(i => i.recommendation === 'SELL').length;
       const highConfCount = items.filter(i => i.recommendation === 'BUY' && i.confidence >= 80).length;
-      summary.innerHTML = `전체 ${items.length}개 종목 분석 완료 &nbsp;`
+      const failedCount = totalPool - items.length;
+      summary.innerHTML = `<span>전체 ${items.length}/${totalPool}개 종목 분석</span> `
         + `<span class="badge badge-buy">매수 ${buyCount}</span> `
         + (highConfCount > 0 ? `<span class="badge badge-buy" style="background:rgba(34,197,94,.2)">80%+ ${highConfCount}</span> ` : '')
         + `<span class="badge badge-hold">보유 ${holdCount}</span> `
-        + `<span class="badge badge-sell">매도 ${sellCount}</span>`;
+        + `<span class="badge badge-sell">매도 ${sellCount}</span>`
+        + (failedCount > 0 ? ` <span class="badge" style="background:rgba(239,68,68,.15);color:var(--sell);font-size:.7rem">${failedCount}개 실패</span>` : '')
+        + ` <button id="btn-refresh-recs" class="strat-btn strat-btn--primary" style="margin-left:auto;padding:.3rem .8rem;font-size:.75rem">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            새로고침
+          </button>`;
       container.appendChild(summary);
+
+      // Refresh button handler
+      document.getElementById('btn-refresh-recs').addEventListener('click', async () => {
+        clearApiCache('rec');
+        DashboardView.render(container);
+      });
 
       // Market regime warning
       this._addMarketWarning(container);
 
       if (items.length === 0) {
-        container.innerHTML = '<div class="empty-state">추천 데이터가 없습니다</div>';
+        container.innerHTML += '<div class="empty-state">추천 데이터가 없습니다. 새로고침을 시도하세요.</div>';
         return;
       }
 
@@ -56,7 +101,11 @@ const DashboardView = {
         container.appendChild(this._section('매도 / 주의', 'badge-sell', sellItems));
       }
     } catch (err) {
-      container.innerHTML = `<div class="empty-state">데이터 로딩 실패: ${err.message}</div>`;
+      if (progressInterval) clearInterval(progressInterval);
+      container.innerHTML = `<div class="empty-state">
+        데이터 로딩 실패: ${err.message}
+        <br><button onclick="clearApiCache('rec'); DashboardView.render(this.closest('.main-content') || document.getElementById('main-content'))" class="strat-btn strat-btn--primary" style="margin-top:1rem">다시 시도</button>
+      </div>`;
     }
   },
 

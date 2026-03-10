@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from services.recommendation_service import get_recommendations, DEFAULT_TICKERS
+from services.recommendation_service import get_recommendations, DEFAULT_TICKERS, _progress, _cache
 
 router = APIRouter()
 
@@ -17,5 +17,19 @@ async def recommendations(
     result = await get_recommendations(tickers=ticker_list, limit=limit)
     return {
         "count": len(result),
+        "total_pool": len(DEFAULT_TICKERS),
         "recommendations": result,
+    }
+
+
+@router.get("/recommendations/progress")
+async def recommendations_progress():
+    """분석 진행률 조회."""
+    has_cache = _cache["data"] is not None and len(_cache["data"]) > 0
+    return {
+        "total": _progress["total"] or len(DEFAULT_TICKERS),
+        "done": _progress["done"],
+        "running": _progress["running"],
+        "cached": len(_cache["data"]) if _cache["data"] else 0,
+        "has_cache": has_cache,
     }

@@ -11,6 +11,9 @@ from services.ml_service import predict_confidence as ml_predict
 _cache = {"data": None, "timestamp": 0}
 CACHE_TTL = 14400  # 4시간
 
+# 분석 진행률 추적
+_progress = {"total": 0, "done": 0, "running": False}
+
 # 분석 대상 종목 풀
 DEFAULT_TICKERS = [
     # === 나스닥 100 ===
@@ -555,6 +558,7 @@ def _calc_confidence(total_score: int, breakdown: dict, tech: dict | None = None
 def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
     """단일 종목 분석 (스레드에서 실행)."""
     import time as _time
+    result = None
     for attempt in range(3):
         try:
             tech = get_technical_indicators(ticker)
@@ -732,16 +736,28 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     include_news = tickers is not None and len(tickers) <= 10
     loop = asyncio.get_running_loop()
 
+    # 진행률 초기화
+    _progress["total"] = len(pool)
+    _progress["done"] = 0
+    _progress["running"] = True
+
+    def _tracked_analyze(t, news):
+        result = _analyze_single(t, news)
+        _progress["done"] += 1
+        return result
+
     # 배치 처리: Yahoo Finance rate limit 방지 (30개씩, 배치 간 2초 대기)
     BATCH_SIZE = 30
     results = []
     for i in range(0, len(pool), BATCH_SIZE):
         batch = pool[i:i + BATCH_SIZE]
-        futures = [loop.run_in_executor(_executor, _analyze_single, t, include_news) for t in batch]
+        futures = [loop.run_in_executor(_executor, _tracked_analyze, t, include_news) for t in batch]
         raw = await asyncio.gather(*futures)
         results.extend([r for r in raw if r is not None])
         if i + BATCH_SIZE < len(pool):
             await asyncio.sleep(2)
+
+    _progress["running"] = False
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
