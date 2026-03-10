@@ -89,7 +89,20 @@ async def model_train(
     """LightGBM 모델 학습. 캐시된 10년 데이터 사용."""
     import asyncio
     loop = asyncio.get_running_loop()
+    import math, json
+
+    def _sanitize(obj):
+        """Replace NaN/Inf with None recursively for JSON safety."""
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize(v) for v in obj]
+        return obj
+
     result = await loop.run_in_executor(None, train_model, hold_days)
+    result = _sanitize(result)
     if "error" not in result:
         # 학습 후 메모리 캐시 초기화 (새 모델 반영)
         clear_backtest_cache()
