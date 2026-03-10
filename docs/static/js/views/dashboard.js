@@ -1,7 +1,7 @@
 // === Dashboard View ===
 
 const DashboardView = {
-  async render(container) {
+  async render(container, forceRefresh = false) {
     // 진행률 표시 로딩 UI
     container.innerHTML = `
       <div class="dash-loading" id="dash-loading">
@@ -38,7 +38,9 @@ const DashboardView = {
         } catch {}
       }, 1500);
 
-      const res = await API.getRecommendations(300);
+      const res = forceRefresh
+        ? await API._fetch('/recommendations?limit=300&force_refresh=true')
+        : await API.getRecommendations(300);
       clearInterval(progressInterval);
       this._renderResults(container, res);
     } catch (err) {
@@ -82,11 +84,10 @@ const DashboardView = {
         </button>`;
     container.appendChild(summary);
 
-    // Refresh button → 전체 새로고침 (백엔드+프론트 캐시 클리어 → 재분석)
+    // Refresh button → 전체 새로고침 (force_refresh로 백엔드 재분석)
     document.getElementById('btn-refresh-recs').addEventListener('click', async () => {
-      try { await fetch(API_BASE + '/recommendations/clear', { method: 'POST' }); } catch(e) {}
       clearApiCache('rec');
-      DashboardView.render(container);
+      DashboardView.render(container, true);
     });
 
     // Retry button → 실패한 종목만 재시도

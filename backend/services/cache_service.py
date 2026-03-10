@@ -10,11 +10,8 @@ import pandas as pd
 _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 _DB_PATH = os.path.join(_DB_DIR, "cache.db")
 
-# TTL (초)
-TTL_HISTORY_SHORT = 12 * 3600    # 가격 히스토리 1d interval: 12시간
-TTL_HISTORY_LONG = 7 * 24 * 3600  # 가격 히스토리 10y, 1y 등: 7일
-TTL_INFO = 7 * 24 * 3600         # 회사 정보 (stock.info): 7일
-TTL_FINANCIALS = 7 * 24 * 3600   # 재무 데이터 (stock.financials): 7일
+# 원시 데이터(가격/회사/재무)는 TTL 없이 영구 캐시 — 있으면 사용, 없으면 fetch
+# 추천 결과 캐시만 TTL 적용
 
 _local = threading.local()
 
@@ -58,29 +55,19 @@ def _init_tables(conn: sqlite3.Connection):
     conn.commit()
 
 
-def _history_ttl(period: str, interval: str) -> int:
-    """period/interval에 따른 TTL 결정."""
-    if period in ("1d", "5d") or interval in ("1m", "5m", "15m", "30m", "1h"):
-        return TTL_HISTORY_SHORT
-    return TTL_HISTORY_LONG
-
-
 # ── 가격 히스토리 ──
 
 def get_cached_history(ticker: str, period: str, interval: str) -> pd.DataFrame | None:
-    """캐시된 DataFrame 반환. 만료/미스 시 None."""
+    """캐시된 DataFrame 반환. 미스 시 None."""
     conn = _get_conn()
     row = conn.execute(
-        "SELECT data, updated_at FROM price_history WHERE ticker=? AND period=? AND interval_=?",
+        "SELECT data FROM price_history WHERE ticker=? AND period=? AND interval_=?",
         (ticker, period, interval),
     ).fetchone()
     if row is None:
         return None
-    data_blob, updated_at = row
-    if time.time() - updated_at > _history_ttl(period, interval):
-        return None
     try:
-        return pickle.loads(data_blob)
+        return pickle.loads(row[0])
     except Exception:
         return None
 
@@ -101,15 +88,12 @@ def set_cached_history(ticker: str, period: str, interval: str, df: pd.DataFrame
 def get_cached_info(ticker: str) -> dict | None:
     conn = _get_conn()
     row = conn.execute(
-        "SELECT data, updated_at FROM company_info WHERE ticker=?", (ticker,)
+        "SELECT data FROM company_info WHERE ticker=?", (ticker,)
     ).fetchone()
     if row is None:
         return None
-    data_blob, updated_at = row
-    if time.time() - updated_at > TTL_INFO:
-        return None
     try:
-        return pickle.loads(data_blob)
+        return pickle.loads(row[0])
     except Exception:
         return None
 
@@ -129,15 +113,12 @@ def set_cached_info(ticker: str, data: dict):
 def get_cached_financials(ticker: str) -> dict | None:
     conn = _get_conn()
     row = conn.execute(
-        "SELECT data, updated_at FROM financial_data WHERE ticker=?", (ticker,)
+        "SELECT data FROM financial_data WHERE ticker=?", (ticker,)
     ).fetchone()
     if row is None:
         return None
-    data_blob, updated_at = row
-    if time.time() - updated_at > TTL_FINANCIALS:
-        return None
     try:
-        return pickle.loads(data_blob)
+        return pickle.loads(row[0])
     except Exception:
         return None
 
