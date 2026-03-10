@@ -34,12 +34,12 @@ async def _background_refresh():
             from services.backtest_service import run_backtest
 
             # 추천 갱신
-            await get_recommendations(limit=100)
+            await get_recommendations(limit=300)
             logger.info("[Scheduler] 추천 캐시 갱신 완료")
 
             # 백테스트 갱신 (20, 40, 60일)
             for hd in [20, 40, 60]:
-                await run_backtest(hold_days=hd, limit=100)
+                await run_backtest(hold_days=hd, limit=300)
                 logger.info(f"[Scheduler] 백테스트 {hd}일 캐시 갱신 완료")
 
         except Exception as e:

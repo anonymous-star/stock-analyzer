@@ -5,7 +5,7 @@ const DashboardView = {
     Utils.showSpinner(container, '종목 분석 중...');
 
     try {
-      const res = await API.getRecommendations(50);
+      const res = await API.getRecommendations(300);
       const items = res.recommendations || [];
       container.innerHTML = '';
 

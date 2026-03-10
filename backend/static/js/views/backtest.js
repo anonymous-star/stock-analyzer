@@ -115,7 +115,7 @@ const BacktestView = {
         statusDiv.innerHTML = `
           <div class="spinner"></div>
           <div class="spinner-text">10년 백테스트 수집 중... ${periods[i]}일 보유 (${i + 1}/${periods.length})</div>`;
-        allData.push(await API.getBacktest(periods[i], 100));
+        allData.push(await API.getBacktest(periods[i], 300));
       }
 
       const rows = this._aggregateRows(allData, periods);
@@ -230,7 +230,7 @@ const BacktestView = {
     Utils.showSpinner(resultsDiv, '백테스트 실행 중...');
 
     try {
-      const res = await API.getBacktest(holdDays, 50);
+      const res = await API.getBacktest(holdDays, 300);
       const results = res.results || [];
       resultsDiv.innerHTML = '';
 

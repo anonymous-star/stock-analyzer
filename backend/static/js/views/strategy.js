@@ -15,10 +15,10 @@ const StrategyView = {
 
     try {
       const [recsRes, bt20, bt40, bt60] = await Promise.all([
-        API.getRecommendations(100),
-        API.getBacktest(20, 100),
-        API.getBacktest(40, 100),
-        API.getBacktest(60, 100),
+        API.getRecommendations(300),
+        API.getBacktest(20, 300),
+        API.getBacktest(40, 300),
+        API.getBacktest(60, 300),
       ]);
 
       const recs = recsRes.recommendations || [];
