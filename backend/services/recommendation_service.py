@@ -13,6 +13,7 @@ CACHE_TTL = 14400  # 4시간
 
 # 분석 진행률 추적
 _progress = {"total": 0, "done": 0, "running": False}
+_analysis_lock = asyncio.Lock()
 
 # 분석 대상 종목 풀
 DEFAULT_TICKERS = [
@@ -731,33 +732,47 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     if use_cache and _cache["data"] is not None and (time.time() - _cache["timestamp"]) < CACHE_TTL:
         return _cache["data"][:limit]
 
-    pool = tickers if tickers else DEFAULT_TICKERS
-    # 기본 풀 스캔에서는 뉴스 제외, 소수 커스텀 티커일 때만 포함
-    include_news = tickers is not None and len(tickers) <= 10
-    loop = asyncio.get_running_loop()
+    # 이미 분석 진행 중이면 완료될 때까지 대기
+    if use_cache and _progress["running"]:
+        for _ in range(600):  # 최대 5분 대기
+            await asyncio.sleep(0.5)
+            if not _progress["running"]:
+                break
+        if _cache["data"] is not None:
+            return _cache["data"][:limit]
 
-    # 진행률 초기화
-    _progress["total"] = len(pool)
-    _progress["done"] = 0
-    _progress["running"] = True
+    async with _analysis_lock:
+        # 락 획득 후 다시 캐시 확인 (다른 요청이 이미 완료했을 수 있음)
+        if use_cache and _cache["data"] is not None and (time.time() - _cache["timestamp"]) < CACHE_TTL:
+            return _cache["data"][:limit]
 
-    def _tracked_analyze(t, news):
-        result = _analyze_single(t, news)
-        _progress["done"] += 1
-        return result
+        pool = tickers if tickers else DEFAULT_TICKERS
+        include_news = tickers is not None and len(tickers) <= 10
+        loop = asyncio.get_running_loop()
 
-    # 배치 처리: Yahoo Finance rate limit 방지 (50개씩, 배치 간 1초 대기)
-    BATCH_SIZE = 50
-    results = []
-    for i in range(0, len(pool), BATCH_SIZE):
-        batch = pool[i:i + BATCH_SIZE]
-        futures = [loop.run_in_executor(_executor, _tracked_analyze, t, include_news) for t in batch]
-        raw = await asyncio.gather(*futures)
-        results.extend([r for r in raw if r is not None])
-        if i + BATCH_SIZE < len(pool):
-            await asyncio.sleep(1)
+        # 진행률 초기화
+        _progress["total"] = len(pool)
+        _progress["done"] = 0
+        _progress["running"] = True
 
-    _progress["running"] = False
+        def _tracked_analyze(t, news):
+            result = _analyze_single(t, news)
+            _progress["done"] += 1
+            return result
+
+        # 배치 처리: Yahoo Finance rate limit 방지 (50개씩, 배치 간 1초 대기)
+        BATCH_SIZE = 50
+        results = []
+        try:
+            for i in range(0, len(pool), BATCH_SIZE):
+                batch = pool[i:i + BATCH_SIZE]
+                futures = [loop.run_in_executor(_executor, _tracked_analyze, t, include_news) for t in batch]
+                raw = await asyncio.gather(*futures)
+                results.extend([r for r in raw if r is not None])
+                if i + BATCH_SIZE < len(pool):
+                    await asyncio.sleep(1)
+        finally:
+            _progress["running"] = False
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
