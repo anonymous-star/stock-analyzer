@@ -7,7 +7,10 @@ import '../models/recommendation.dart';
 
 class ApiService {
   // Change this to your backend IP when running on a physical device
-  static const String baseUrl = 'http://192.168.219.103:8000';
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://civilisable-albertha-preeconomical.ngrok-free.dev',
+  );
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -17,7 +20,9 @@ class ApiService {
 
   Future<T> _get<T>(String path, T Function(dynamic) parser) async {
     final uri = Uri.parse('$baseUrl$path');
-    final response = await _client.get(uri).timeout(const Duration(seconds: 30));
+    final response = await _client.get(uri, headers: {
+      'ngrok-skip-browser-warning': 'true',
+    }).timeout(const Duration(seconds: 30));
 
     if (response.statusCode == 200) {
       final decoded = utf8.decode(response.bodyBytes);
@@ -35,7 +40,10 @@ class ApiService {
     final uri = Uri.parse('$baseUrl$path');
     final response = await _client.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: body != null ? json.encode(body) : null,
     ).timeout(const Duration(seconds: 60));
 
