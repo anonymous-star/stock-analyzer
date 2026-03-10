@@ -555,15 +555,18 @@ def _calc_confidence(total_score: int, breakdown: dict, tech: dict | None = None
 def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
     """단일 종목 분석 (스레드에서 실행)."""
     import time as _time
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             tech = get_technical_indicators(ticker)
             if "error" in tech:
+                if attempt < 2:
+                    _time.sleep(2 * (attempt + 1))
+                    continue
                 return None
             quote = get_quote(ticker)
             if not quote.get("current_price"):
-                if attempt == 0:
-                    _time.sleep(1)
+                if attempt < 2:
+                    _time.sleep(2 * (attempt + 1))
                     continue
                 return None
 
@@ -706,8 +709,8 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "trade_guide": trade_guide,
             }
         except Exception:
-            if attempt == 0:
-                _time.sleep(1)
+            if attempt < 2:
+                _time.sleep(2 * (attempt + 1))
                 continue
             return None
     return None
@@ -729,10 +732,16 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
     include_news = tickers is not None and len(tickers) <= 10
     loop = asyncio.get_running_loop()
 
-    futures = [loop.run_in_executor(_executor, _analyze_single, t, include_news) for t in pool]
-    raw_results = await asyncio.gather(*futures)
-
-    results = [r for r in raw_results if r is not None]
+    # 배치 처리: Yahoo Finance rate limit 방지 (30개씩, 배치 간 2초 대기)
+    BATCH_SIZE = 30
+    results = []
+    for i in range(0, len(pool), BATCH_SIZE):
+        batch = pool[i:i + BATCH_SIZE]
+        futures = [loop.run_in_executor(_executor, _analyze_single, t, include_news) for t in batch]
+        raw = await asyncio.gather(*futures)
+        results.extend([r for r in raw if r is not None])
+        if i + BATCH_SIZE < len(pool):
+            await asyncio.sleep(2)
 
     # BUY 우선, 점수 높은 순 정렬
     results.sort(key=lambda x: (0 if x["recommendation"] == "BUY" else 1 if x["recommendation"] == "HOLD" else 2, -x["score"]))
