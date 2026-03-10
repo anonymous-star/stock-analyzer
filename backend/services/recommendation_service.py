@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from services.stock_service import get_quote
@@ -680,11 +681,17 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                     "strategy": f"{tp:.0f}% 도달 시 익절, {sl:.0f}% 이탈 시 손절, 최대 20일 보유"
                 }
 
+            def _clean(v):
+                """Replace NaN/Inf floats with None for JSON safety."""
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    return None
+                return v
+
             return {
                 "ticker": ticker,
                 "name": quote.get("name") or ticker,
-                "current_price": quote.get("current_price"),
-                "change_percent": quote.get("change_percent"),
+                "current_price": _clean(quote.get("current_price")),
+                "change_percent": _clean(quote.get("change_percent")),
                 "currency": quote.get("currency"),
                 "recommendation": rec,
                 "score": total_score,
@@ -692,10 +699,10 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "confidence": confidence,
                 "score_breakdown": breakdown,
                 "reasons": all_reasons[:5],
-                "rsi": tech.get("rsi"),
+                "rsi": _clean(tech.get("rsi")),
                 "ma_trend": (tech.get("signals") or {}).get("ma_trend"),
-                "pe_ratio": financials.get("pe_ratio"),
-                "volume_ratio": vol_ratio,
+                "pe_ratio": _clean(financials.get("pe_ratio")),
+                "volume_ratio": _clean(vol_ratio),
                 "trade_guide": trade_guide,
             }
         except Exception:

@@ -1,7 +1,10 @@
+import json
+import math
 import os
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -60,11 +63,36 @@ async def lifespan(app: FastAPI):
         pass
 
 
+class _SafeEncoder(json.JSONEncoder):
+    """JSON encoder that converts NaN/Inf to None."""
+    def default(self, o: Any) -> Any:
+        return super().default(o)
+
+    def iterencode(self, o: Any, _one_shot: bool = False):
+        return super().iterencode(_sanitize_nan(o), _one_shot)
+
+
+def _sanitize_nan(obj: Any) -> Any:
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_nan(v) for v in obj]
+    return obj
+
+
+class SafeJSONResponse(JSONResponse):
+    def render(self, content: Any) -> bytes:
+        return json.dumps(_sanitize_nan(content), ensure_ascii=False).encode("utf-8")
+
+
 app = FastAPI(
     title="Stock Analyzer API",
     description="한국/미국 주식 분석 및 AI 기반 투자 추천 API",
     version="1.0.0",
     lifespan=lifespan,
+    default_response_class=SafeJSONResponse,
 )
 
 app.state.limiter = limiter
