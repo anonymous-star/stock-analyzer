@@ -61,7 +61,7 @@ def _safe_float(val) -> float | None:
         return None
 
 
-def _precompute_indicators(close: pd.Series, volume: pd.Series) -> dict:
+def _precompute_indicators(close: pd.Series, volume: pd.Series, df: pd.DataFrame = None) -> dict:
     """전체 시리즈에 대해 지표를 한 번만 계산."""
     import numpy as np
     n = len(close)
@@ -95,6 +95,21 @@ def _precompute_indicators(close: pd.Series, volume: pd.Series) -> dict:
     # Volatility (20일 std / price %)
     std20 = close.rolling(20).std().values
 
+    # ATR (Average True Range 14일)
+    high = df["High"].values.astype(float) if df is not None and "High" in df.columns else c
+    low = df["Low"].values.astype(float) if df is not None and "Low" in df.columns else c
+    tr = np.maximum(high - low, np.maximum(np.abs(high - np.roll(c, 1)), np.abs(low - np.roll(c, 1))))
+    tr[0] = high[0] - low[0]  # 첫 값 보정
+    atr14 = pd.Series(tr).rolling(14).mean().values
+
+    # Volume trend (최근 5일 / 이전 5일)
+    vol_trend = np.full(n, np.nan)
+    for _i in range(10, n):
+        recent = np.mean(v[_i-4:_i+1])
+        prev = np.mean(v[_i-9:_i-4])
+        if prev > 0:
+            vol_trend[_i] = recent / prev
+
     return {
         "c": c, "v": v, "n": n,
         "ma20": ma20, "ma50": ma50, "ma200": ma200,
@@ -104,6 +119,7 @@ def _precompute_indicators(close: pd.Series, volume: pd.Series) -> dict:
         "macd_line": macd_line, "signal_line": signal_line, "macd_hist": macd_hist,
         "year_high": year_high, "year_low": year_low,
         "std20": std20,
+        "atr14": atr14, "vol_trend": vol_trend,
     }
 
 
@@ -313,6 +329,23 @@ def _score_at(ind: dict, i: int) -> dict | None:
     # === 합산 ===
     score = tech_score + vol_score + mom_score + rec_score
 
+    # ATR
+    atr_pct = None
+    atr_val = ind["atr14"][i]
+    if not math.isnan(atr_val) and price > 0:
+        atr_pct = round(atr_val / price * 100, 2)
+
+    # Volume trend
+    volume_trend = None
+    vt = ind["vol_trend"][i]
+    if not math.isnan(vt):
+        volume_trend = round(vt, 2)
+
+    # MA20 대비 가격 거리
+    price_to_ma20 = None
+    if not math.isnan(ma20) and ma20 > 0:
+        price_to_ma20 = round((price - ma20) / ma20 * 100, 2)
+
     # 품질 지표
     volatility = None
     s20 = ind["std20"][i]
@@ -362,6 +395,9 @@ def _score_at(ind: dict, i: int) -> dict | None:
         "ma20_slope": ma20_slope,
         "macd_accel": macd_accel,
         "trend_20d": trend_20d,
+        "atr_pct": atr_pct,
+        "volume_trend": volume_trend,
+        "price_to_ma20": price_to_ma20,
     }
 
 
@@ -471,7 +507,7 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
         volume = df["Volume"]
 
         # 전체 지표 한 번만 계산
-        ind = _precompute_indicators(close, volume)
+        ind = _precompute_indicators(close, volume, df)
 
         trades = {"BUY": [], "HOLD": [], "SELL": []}
         buy_by_tier = {"매우 강력": [], "강력": [], "양호": [], "보통": []}
@@ -490,10 +526,20 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
             exit_price = float(close_arr[i + hold_days])
             ret = (exit_price - entry_price) / entry_price * 100
 
-            # 백테스트 임계값 (recommendation_service와 동일)
-            is_buy = score >= 5
+            # 백테스트 임계값 (recommendation_service와 동일 품질 필터)
+            is_buy = score >= 5 and signals.get("tech_score", 0) >= 0
+            # 고변동성 BUY 차단 (변동성 > 4%)
+            if is_buy and signals.get("volatility") is not None and signals["volatility"] > 4:
+                is_buy = False
+
             if is_buy:
                 rec = "BUY"
+                # 보너스: 거래량 증가 추세
+                if signals.get("volume_trend") is not None and signals["volume_trend"] > 1.2:
+                    score += 1
+                # 보너스: MA20 지지선 근접 (0~3% 위)
+                if signals.get("price_to_ma20") is not None and 0 <= signals["price_to_ma20"] <= 3:
+                    score += 1
                 # ML 예측 우선, 폴백 규칙
                 ml_features = {**signals}
                 ml_conf = ml_predict(ml_features)
@@ -508,28 +554,34 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
                 max_ret = (max_price - entry_price) / entry_price * 100
                 min_ret = (min_price - entry_price) / entry_price * 100
 
-                # 변동성 기반 동적 SL (익절 없음 = 수익 무제한)
-                vol = signals.get("volatility") or 3.0
-                if vol < 2.5:
-                    sl_pct = -3.0
-                elif vol < 4.0:
-                    sl_pct = -5.0
+                # ATR 기반 동적 SL (recommendation_service와 동일)
+                atr_p = signals.get("atr_pct")
+                if atr_p and atr_p > 0:
+                    sl_pct = -round(atr_p * 1.2, 1)
+                    sl_pct = max(-10.0, min(sl_pct, -1.5))
                 else:
-                    sl_pct = -7.0
+                    vol = signals.get("volatility") or 3.0
+                    if vol < 2.5:
+                        sl_pct = -3.0
+                    elif vol < 4.0:
+                        sl_pct = -5.0
+                    else:
+                        sl_pct = -7.0
 
                 sl_ret = ret  # 기본은 만기 수익
-                tp_hit = False  # TP +1% 도달 여부 (SL보다 먼저)
+                tp_hit = False  # TP +1.5% 도달 여부 (SL보다 먼저)
+                sl_triggered = False
                 for j in range(len(window)):
                     day_ret = (float(window[j]) - entry_price) / entry_price * 100
-                    if day_ret >= 1.0:
+                    if day_ret >= 1.5:
                         tp_hit = True
                         break
                     if day_ret <= sl_pct:
                         sl_ret = sl_pct
+                        sl_triggered = True
                         break
-                else:
-                    # 루프가 break 없이 끝남 → 만기 수익 기준
-                    if ret >= 1.0:
+                if not sl_triggered and not tp_hit:
+                    if ret >= 1.5:
                         tp_hit = True
                 buy_opportunities.append((max_ret, sl_ret, min_ret, tp_hit))
 
@@ -580,14 +632,14 @@ def _backtest_ticker(ticker: str, hold_days: int = 20, sample_interval: int = 7)
             sl_rets = [o[1] for o in buy_opportunities]
             min_rets = [o[2] for o in buy_opportunities]
             tp_hits = [o[3] for o in buy_opportunities]
-            opp_1pct = sum(1 for r in max_rets if r >= 1.0)
+            opp_15pct = sum(1 for r in max_rets if r >= 1.5)
             opp_3pct = sum(1 for r in max_rets if r >= 3.0)
             sl_wins = sum(1 for r in sl_rets if r > 0)
             sl_stopped = sum(1 for r in sl_rets if r < -2.5)
             tp_hit_count = sum(1 for h in tp_hits if h)
             buy_opp = {
                 "tp_hit_rate": round(tp_hit_count / len(tp_hits) * 100, 1),
-                "opportunity_1pct": round(opp_1pct / len(max_rets) * 100, 1),
+                "opportunity_15pct": round(opp_15pct / len(max_rets) * 100, 1),
                 "opportunity_3pct": round(opp_3pct / len(max_rets) * 100, 1),
                 "avg_max_return": round(sum(max_rets) / len(max_rets), 2),
                 "avg_max_drawdown": round(sum(min_rets) / len(min_rets), 2),

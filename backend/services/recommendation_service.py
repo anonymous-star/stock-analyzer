@@ -647,10 +647,27 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "news": news_score,
             }
 
-            # === 추천 결정 ===
+            # === 추천 결정 (품질 필터 포함) ===
             rec = "HOLD"
+            vol_pct = tech.get("volatility")
+            price_to_ma20 = tech.get("price_to_ma20")
+            volume_trend = tech.get("volume_trend")
+
             if total_score >= 5 and tech_score >= 0:
-                rec = "BUY"
+                # 고변동성 BUY 차단 (변동성 > 4% = 예측 불안정)
+                if vol_pct is not None and vol_pct > 4:
+                    rec = "HOLD"
+                else:
+                    rec = "BUY"
+
+                    # 보너스 점수: 거래량 증가 추세 (최근5일 > 이전5일)
+                    if rec == "BUY" and volume_trend is not None and volume_trend > 1.2:
+                        total_score += 1
+
+                    # 보너스 점수: MA20 지지선 근접 매수 (0~3% 위)
+                    if rec == "BUY" and price_to_ma20 is not None and 0 <= price_to_ma20 <= 3:
+                        total_score += 1
+
             elif total_score <= -5:
                 rec = "SELL"
 
@@ -712,19 +729,28 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
             # BUY 시 익절/손절 가이드
             trade_guide = None
             if rec == "BUY":
-                vol_pct = tech.get("volatility") or 3
-                # 변동성 기반 동적 익절/손절
-                if vol_pct < 2.5:
-                    tp, sl = 3.0, -3.0
-                elif vol_pct < 4:
-                    tp, sl = 5.0, -5.0
+                atr_pct = tech.get("atr_pct")
+                if atr_pct and atr_pct > 0:
+                    # ATR 기반 동적 TP/SL (ATR의 배수)
+                    tp = round(atr_pct * 1.5, 1)   # ATR × 1.5
+                    sl = round(-atr_pct * 1.2, 1)   # ATR × 1.2
+                    # 합리적 범위 제한
+                    tp = max(1.5, min(tp, 10.0))
+                    sl = max(-10.0, min(sl, -1.5))
                 else:
-                    tp, sl = 7.0, -7.0
+                    # ATR 없을 때 변동성 폴백
+                    vol_pct = tech.get("volatility") or 3
+                    if vol_pct < 2.5:
+                        tp, sl = 3.0, -3.0
+                    elif vol_pct < 4:
+                        tp, sl = 5.0, -5.0
+                    else:
+                        tp, sl = 7.0, -7.0
                 trade_guide = {
                     "take_profit": tp,
                     "stop_loss": sl,
                     "hold_days": 20,
-                    "strategy": f"{tp:.0f}% 도달 시 익절, {sl:.0f}% 이탈 시 손절, 최대 20일 보유"
+                    "strategy": f"{tp:.1f}% 도달 시 익절, {abs(sl):.1f}% 이탈 시 손절, 최대 20일 보유"
                 }
 
             def _clean(v):

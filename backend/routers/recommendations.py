@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query
 from services.recommendation_service import get_recommendations, retry_failed, DEFAULT_TICKERS, _progress, _cache
+from services.cache_service import clear_results_cache
 
 router = APIRouter()
 
@@ -35,6 +36,15 @@ async def recommendations_retry(
         "failed_count": len(_progress.get("failed_tickers", [])),
         "recommendations": result,
     }
+
+
+@router.post("/recommendations/clear")
+async def recommendations_clear():
+    """추천 메모리+디스크 캐시 초기화 → 다음 요청 시 전체 재분석."""
+    _cache["data"] = None
+    _cache["timestamp"] = 0
+    clear_results_cache()
+    return {"status": "ok", "message": "추천 캐시 초기화 완료"}
 
 
 @router.get("/recommendations/progress")

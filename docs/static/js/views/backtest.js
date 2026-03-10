@@ -253,7 +253,7 @@ const BacktestView = {
           <div class="backtest-stat">
             <div class="backtest-stat-label">익절 적중률</div>
             <div class="backtest-stat-value" style="color:var(--buy)">${s.tp_hit_rate || 0}%</div>
-            <div class="backtest-stat-sub">+1% TP 도달 (SL 전)</div>
+            <div class="backtest-stat-sub">+1.5% TP 도달 (SL 전)</div>
           </div>
           <div class="backtest-stat">
             <div class="backtest-stat-label">만기 적중률</div>
@@ -339,8 +339,8 @@ const BacktestView = {
       </div>
       ${item.buy_opportunity ? `
       <div class="indicator-row" style="padding:.5rem 0">
-        <span class="indicator-label">1%+ 수익 기회</span>
-        <span class="indicator-value" style="color:var(--buy)">${item.buy_opportunity.opportunity_1pct}%</span>
+        <span class="indicator-label">1.5%+ 수익 기회</span>
+        <span class="indicator-value" style="color:var(--buy)">${item.buy_opportunity.opportunity_15pct}%</span>
       </div>
       <div class="indicator-row" style="padding:.5rem 0">
         <span class="indicator-label">3%+ 수익 기회</span>

@@ -82,8 +82,9 @@ const DashboardView = {
         </button>`;
     container.appendChild(summary);
 
-    // Refresh button → 전체 새로고침 (캐시 클리어)
+    // Refresh button → 전체 새로고침 (백엔드+프론트 캐시 클리어 → 재분석)
     document.getElementById('btn-refresh-recs').addEventListener('click', async () => {
+      try { await fetch(API_BASE + '/recommendations/clear', { method: 'POST' }); } catch(e) {}
       clearApiCache('rec');
       DashboardView.render(container);
     });

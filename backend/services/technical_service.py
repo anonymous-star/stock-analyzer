@@ -208,6 +208,37 @@ def get_technical_indicators(ticker: str) -> dict:
         if price_20d_ago > 0:
             result["trend_20d"] = round((float(close.iloc[-1]) - price_20d_ago) / price_20d_ago * 100, 2)
 
+    # ATR (Average True Range) — 동적 TP/SL 계산용
+    if len(df) >= 15:
+        try:
+            high = df["High"]
+            low = df["Low"]
+            tr = pd.concat([
+                high - low,
+                (high - close.shift(1)).abs(),
+                (low - close.shift(1)).abs()
+            ], axis=1).max(axis=1)
+            atr14 = tr.rolling(14).mean()
+            result["atr"] = _safe_float(atr14.iloc[-1])
+            if result["atr"] and close.iloc[-1] > 0:
+                result["atr_pct"] = round(float(atr14.iloc[-1]) / float(close.iloc[-1]) * 100, 2)
+        except Exception:
+            pass
+
+    # 거래량 추세 — 최근 5일 거래량 / 이전 5일 거래량
+    if len(volume) >= 10:
+        try:
+            recent_vol = float(volume.tail(5).mean())
+            prev_vol = float(volume.iloc[-10:-5].mean())
+            if prev_vol > 0:
+                result["volume_trend"] = round(recent_vol / prev_vol, 2)
+        except Exception:
+            pass
+
+    # MA20 대비 가격 거리 (%) — 지지선 근접 판단
+    if result.get("ma20") and result.get("current_price") and result["ma20"] > 0:
+        result["price_to_ma20"] = round((result["current_price"] - result["ma20"]) / result["ma20"] * 100, 2)
+
     # Signals interpretation
     result["signals"] = _interpret_signals(result)
 
