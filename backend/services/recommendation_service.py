@@ -135,7 +135,7 @@ DEFAULT_TICKERS = [
     "GE", "GM", "F", "BA", "SBUX", "NKE", "TGT", "COP",
 ]
 
-_executor = ThreadPoolExecutor(max_workers=12)
+_executor = ThreadPoolExecutor(max_workers=6)
 
 
 # ── 점수 체계 ──
@@ -559,18 +559,18 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
     """단일 종목 분석 (스레드에서 실행)."""
     import time as _time
     result = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             tech = get_technical_indicators(ticker)
             if "error" in tech:
-                if attempt < 2:
-                    _time.sleep(2 * (attempt + 1))
+                if attempt == 0:
+                    _time.sleep(1)
                     continue
                 return None
             quote = get_quote(ticker)
             if not quote.get("current_price"):
-                if attempt < 2:
-                    _time.sleep(2 * (attempt + 1))
+                if attempt == 0:
+                    _time.sleep(1)
                     continue
                 return None
 
@@ -713,8 +713,8 @@ def _analyze_single(ticker: str, include_news: bool = False) -> dict | None:
                 "trade_guide": trade_guide,
             }
         except Exception:
-            if attempt < 2:
-                _time.sleep(2 * (attempt + 1))
+            if attempt == 0:
+                _time.sleep(1)
                 continue
             return None
     return None
