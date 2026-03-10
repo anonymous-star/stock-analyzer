@@ -135,7 +135,7 @@ DEFAULT_TICKERS = [
     "GE", "GM", "F", "BA", "SBUX", "NKE", "TGT", "COP",
 ]
 
-_executor = ThreadPoolExecutor(max_workers=8)
+_executor = ThreadPoolExecutor(max_workers=12)
 
 
 # ── 점수 체계 ──
@@ -746,8 +746,8 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
         _progress["done"] += 1
         return result
 
-    # 배치 처리: Yahoo Finance rate limit 방지 (30개씩, 배치 간 2초 대기)
-    BATCH_SIZE = 30
+    # 배치 처리: Yahoo Finance rate limit 방지 (50개씩, 배치 간 1초 대기)
+    BATCH_SIZE = 50
     results = []
     for i in range(0, len(pool), BATCH_SIZE):
         batch = pool[i:i + BATCH_SIZE]
@@ -755,7 +755,7 @@ async def get_recommendations(tickers: list[str] | None = None, limit: int = 20)
         raw = await asyncio.gather(*futures)
         results.extend([r for r in raw if r is not None])
         if i + BATCH_SIZE < len(pool):
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
     _progress["running"] = False
 
